@@ -48,12 +48,16 @@ export {
   openchoreoReleaseCreatePermission,
   openchoreoReleaseReadPermission,
   openchoreoReleaseBindingUpdatePermission,
+  openchoreoReleaseBindingRollbackPermission,
+  openchoreoReleaseBindingDeleteRevisionPermission,
   openchoreoReleaseBindingDeletePermission,
   openchoreoReleaseBindingReadPermission,
   openchoreoReleaseBindingViewPermission,
   openchoreoResourceReleaseBindingUpdatePermission,
   openchoreoResourceReleaseBindingCreatePermission,
   openchoreoResourceReleaseBindingDeletePermission,
+  openchoreoResourceReleaseBindingRollbackPermission,
+  openchoreoResourceReleaseBindingDeleteRevisionPermission,
   openchoreoRoleViewPermission,
   openchoreoRoleCreatePermission,
   openchoreoRoleUpdatePermission,
@@ -286,6 +290,40 @@ export type ResourceTypeOutput =
 /** ComponentRelease resource type from the OpenAPI spec */
 export type ComponentRelease =
   OpenChoreoComponents['schemas']['ComponentRelease'];
+/**
+ * One recorded spec of a ReleaseBinding. The controller records a revision
+ * for every spec change and tracks the health of the active one.
+ */
+export type ReleaseBindingRevision =
+  OpenChoreoComponents['schemas']['ReleaseBindingRevision'];
+/**
+ * One recorded spec of a ResourceReleaseBinding, the resource counterpart of
+ * ReleaseBindingRevision: it records resourceReleaseName instead of
+ * componentReleaseName and shares the status and rollback models.
+ */
+export type ResourceReleaseBindingRevision =
+  OpenChoreoComponents['schemas']['ResourceReleaseBindingRevision'];
+/** A revision of either binding kind */
+export type BindingRevision =
+  | ReleaseBindingRevision
+  | ResourceReleaseBindingRevision;
+/** Health of a binding revision, e.g. Healthy or Progressing */
+export type BindingRevisionHealth = NonNullable<
+  OpenChoreoComponents['schemas']['BindingRevisionStatus']['health']
+>;
+/** Result of a binding rollback, or of its dry run */
+export type RollbackResponse =
+  OpenChoreoComponents['schemas']['RollbackResponse'];
+
+/**
+ * The result of deleting one revision from a binding's history, or of
+ * checking that it may be deleted (dryRun).
+ */
+export type DeleteBindingRevisionResponse =
+  OpenChoreoComponents['schemas']['DeleteBindingRevisionResponse'];
+/** A pre-flight finding of a rollback that does not block it */
+export type RollbackWarning =
+  OpenChoreoComponents['schemas']['RollbackWarning'];
 export type ModelsCompleteComponent = ComponentResponse;
 export type WorkflowRunStatusResponse = ComponentWorkflowRunStatusResponse;
 

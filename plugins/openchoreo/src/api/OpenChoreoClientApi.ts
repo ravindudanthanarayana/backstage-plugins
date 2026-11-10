@@ -4,6 +4,10 @@ import type {
   WorkloadResource,
   ComponentRelease,
   ReleaseBindingCondition,
+  ReleaseBindingRevision,
+  ResourceReleaseBindingRevision,
+  RollbackResponse,
+  DeleteBindingRevisionResponse,
 } from '@openchoreo/backstage-plugin-common';
 import type { Environment } from '../components/RuntimeLogs/types';
 
@@ -806,6 +810,74 @@ export interface OpenChoreoClientApi {
 
   /** List all component releases for a component (sorted newest first by caller) */
   listComponentReleases(entity: Entity): Promise<ComponentReleasesResponse>;
+
+  /**
+   * List the revisions of the component's release binding in one
+   * environment. Order is not guaranteed; callers sort.
+   */
+  listReleaseBindingRevisions(
+    entity: Entity,
+    environment: string,
+  ): Promise<ReleaseBindingRevision[]>;
+
+  /**
+   * Roll a release binding back to an earlier revision. With dryRun, nothing
+   * is written and the response carries the changes and warnings.
+   */
+  rollbackReleaseBinding(
+    entity: Entity,
+    bindingName: string,
+    revision: number,
+    dryRun: boolean,
+    /** Optional reason for the rollback; only sent with an applied rollback. */
+    message?: string,
+  ): Promise<RollbackResponse>;
+
+  /**
+   * Delete one inactive revision from the Component's release binding
+   * history, or with dryRun only check that it may be deleted. The other
+   * revisions keep their numbers.
+   */
+  deleteReleaseBindingRevision(
+    entity: Entity,
+    bindingName: string,
+    revisionName: string,
+    dryRun: boolean,
+  ): Promise<DeleteBindingRevisionResponse>;
+
+  /**
+   * List the revisions of the Resource's release binding in one
+   * environment. Order is not guaranteed; callers sort.
+   */
+  listResourceReleaseBindingRevisions(
+    entity: Entity,
+    environment: string,
+  ): Promise<ResourceReleaseBindingRevision[]>;
+
+  /**
+   * Roll a resource release binding back to an earlier revision. With
+   * dryRun, nothing is written and the response carries the changes and
+   * warnings.
+   */
+  rollbackResourceReleaseBinding(
+    entity: Entity,
+    bindingName: string,
+    revision: number,
+    dryRun: boolean,
+    /** Optional reason for the rollback; only sent with an applied rollback. */
+    message?: string,
+  ): Promise<RollbackResponse>;
+
+  /**
+   * Delete one inactive revision from the Resource's release binding
+   * history, or with dryRun only check that it may be deleted.
+   */
+  deleteResourceReleaseBindingRevision(
+    entity: Entity,
+    bindingName: string,
+    revisionName: string,
+    dryRun: boolean,
+  ): Promise<DeleteBindingRevisionResponse>;
 
   /** Create or update a release binding for deploy/promote actions */
   updateReleaseBinding(

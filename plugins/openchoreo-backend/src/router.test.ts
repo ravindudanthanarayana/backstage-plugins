@@ -91,6 +91,14 @@ function createMockServices() {
       fetchProjectRelease: jest.fn(),
       fetchProjectReleaseSchema: jest.fn(),
     },
+    releaseBindingRevisionService: {
+      listRevisions: jest.fn(),
+      rollback: jest.fn(),
+      listResourceRevisions: jest.fn(),
+      rollbackResource: jest.fn(),
+      deleteRevision: jest.fn(),
+      deleteResourceRevision: jest.fn(),
+    },
     secretReferencesInfoService: {
       fetchSecretReferences: jest.fn(),
     },
@@ -855,6 +863,344 @@ describe('createRouter', () => {
             'componentName, projectName, namespaceName and bindingName are required',
           ),
         }),
+      });
+    });
+  });
+
+  describe('GET /release-binding-revisions', () => {
+    it('lists the revisions of a binding', async () => {
+      const revisions = [{ metadata: { name: 'api-dev-r1' } }];
+      services.releaseBindingRevisionService.listRevisions.mockResolvedValue(
+        revisions,
+      );
+
+      const response = await request(app)
+        .get('/release-binding-revisions')
+        .query({
+          namespaceName: 'my-namespace',
+          componentName: 'api',
+          environment: 'development',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(revisions);
+      expect(
+        services.releaseBindingRevisionService.listRevisions,
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'my-namespace',
+          componentName: 'api',
+          environment: 'development',
+        },
+        'mock-user-token',
+      );
+    });
+
+    it('returns 400 without an environment', async () => {
+      const response = await request(app)
+        .get('/release-binding-revisions')
+        .query({ namespaceName: 'my-namespace', componentName: 'api' });
+
+      expect(response.status).toBe(400);
+    });
+  });
+
+  describe.each([
+    ['/delete-release-binding-revision', 'deleteRevision'],
+    ['/delete-resource-release-binding-revision', 'deleteResourceRevision'],
+  ] as const)('POST %s', (path, method) => {
+    it('checks or deletes the named revision', async () => {
+      const result = { revisionName: 'api-dev-r2', revision: 2, dryRun: true };
+      services.releaseBindingRevisionService[method].mockResolvedValue(result);
+
+      const response = await request(app).post(path).send({
+        namespaceName: 'ns',
+        bindingName: 'api-dev',
+        revisionName: 'api-dev-r2',
+        dryRun: true,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(result);
+      expect(
+        services.releaseBindingRevisionService[method],
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'ns',
+          bindingName: 'api-dev',
+          revisionName: 'api-dev-r2',
+          dryRun: true,
+        },
+        'mock-user-token',
+      );
+    });
+
+    it('deletes when dryRun is omitted', async () => {
+      services.releaseBindingRevisionService[method].mockResolvedValue({});
+
+      await request(app).post(path).send({
+        namespaceName: 'ns',
+        bindingName: 'api-dev',
+        revisionName: 'api-dev-r2',
+      });
+
+      expect(
+        services.releaseBindingRevisionService[method],
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ dryRun: false }),
+        'mock-user-token',
+      );
+    });
+
+    it.each([
+      [{ namespaceName: 'ns', bindingName: 'b' }, 'revisionName'],
+      [
+        {
+          namespaceName: 'ns',
+          bindingName: 'b',
+          revisionName: 'b-r2',
+          dryRun: 'yes',
+        },
+        'dryRun',
+      ],
+    ])('returns 400 for %j', async (body, message) => {
+      const response = await request(app).post(path).send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.message).toContain(message);
+      expect(
+        services.releaseBindingRevisionService[method],
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /rollback-release-binding', () => {
+    it('previews a rollback', async () => {
+      const preview = { dryRun: true, revision: 4, warnings: [], changes: [] };
+      services.releaseBindingRevisionService.rollback.mockResolvedValue(
+        preview,
+      );
+
+      const response = await request(app)
+        .post('/rollback-release-binding')
+        .send({
+          namespaceName: 'my-namespace',
+          bindingName: 'api-dev',
+          revision: 2,
+          dryRun: true,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(preview);
+      expect(
+        services.releaseBindingRevisionService.rollback,
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'my-namespace',
+          bindingName: 'api-dev',
+          revision: 2,
+          dryRun: true,
+        },
+        'mock-user-token',
+      );
+    });
+
+    it('passes a trimmed message through', async () => {
+      services.releaseBindingRevisionService.rollback.mockResolvedValue({});
+
+      await request(app).post('/rollback-release-binding').send({
+        namespaceName: 'ns',
+        bindingName: 'api-dev',
+        revision: 2,
+        message: '  Payments failing since r4  ',
+      });
+
+      expect(
+        services.releaseBindingRevisionService.rollback,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Payments failing since r4' }),
+        'mock-user-token',
+      );
+    });
+
+    it('applies the rollback when dryRun is omitted', async () => {
+      services.releaseBindingRevisionService.rollback.mockResolvedValue({});
+
+      await request(app)
+        .post('/rollback-release-binding')
+        .send({ namespaceName: 'ns', bindingName: 'api-dev', revision: 2 });
+
+      expect(
+        services.releaseBindingRevisionService.rollback,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ dryRun: false }),
+        'mock-user-token',
+      );
+    });
+
+    it.each([
+      [{ namespaceName: 'ns', revision: 2 }, 'namespaceName and bindingName'],
+      [{ namespaceName: 'ns', bindingName: 'b', revision: 0 }, 'revision'],
+      [{ namespaceName: 'ns', bindingName: 'b', revision: '2' }, 'revision'],
+      [
+        { namespaceName: 'ns', bindingName: 'b', revision: 2, dryRun: 'yes' },
+        'dryRun',
+      ],
+      [
+        { namespaceName: 'ns', bindingName: 'b', revision: 2, message: 7 },
+        'message must be a string',
+      ],
+      [
+        {
+          namespaceName: 'ns',
+          bindingName: 'b',
+          revision: 2,
+          message: 'x'.repeat(1025),
+        },
+        'message must be at most 1024 characters',
+      ],
+    ])('returns 400 for %j', async (body, message) => {
+      const response = await request(app)
+        .post('/rollback-release-binding')
+        .send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.message).toContain(message);
+      expect(
+        services.releaseBindingRevisionService.rollback,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('passes a conflict code through to the client', async () => {
+      const { ConflictError } = jest.requireActual('@backstage/errors');
+      services.releaseBindingRevisionService.rollback.mockRejectedValue(
+        Object.assign(new ConflictError('release api-aaa has been deleted'), {
+          code: 'RELEASE_DELETED',
+        }),
+      );
+
+      const response = await request(app)
+        .post('/rollback-release-binding')
+        .send({ namespaceName: 'ns', bindingName: 'api-dev', revision: 1 });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toMatchObject({
+        name: 'ConflictError',
+        code: 'RELEASE_DELETED',
+        message: 'release api-aaa has been deleted',
+      });
+    });
+  });
+
+  describe('GET /resource-release-binding-revisions', () => {
+    it('lists the revisions of a resource binding', async () => {
+      const revisions = [{ metadata: { name: 'db-dev-r1' } }];
+      services.releaseBindingRevisionService.listResourceRevisions.mockResolvedValue(
+        revisions,
+      );
+
+      const response = await request(app)
+        .get('/resource-release-binding-revisions')
+        .query({
+          namespaceName: 'my-namespace',
+          resourceName: 'db',
+          environment: 'development',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(revisions);
+      expect(
+        services.releaseBindingRevisionService.listResourceRevisions,
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'my-namespace',
+          resourceName: 'db',
+          environment: 'development',
+        },
+        'mock-user-token',
+      );
+    });
+
+    it('returns 400 without a resourceName', async () => {
+      const response = await request(app)
+        .get('/resource-release-binding-revisions')
+        .query({ namespaceName: 'my-namespace', environment: 'development' });
+
+      expect(response.status).toBe(400);
+      expect(
+        services.releaseBindingRevisionService.listResourceRevisions,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /rollback-resource-release-binding', () => {
+    it('previews a resource rollback', async () => {
+      const preview = { dryRun: true, revision: 2, warnings: [], changes: [] };
+      services.releaseBindingRevisionService.rollbackResource.mockResolvedValue(
+        preview,
+      );
+
+      const response = await request(app)
+        .post('/rollback-resource-release-binding')
+        .send({
+          namespaceName: 'my-namespace',
+          bindingName: 'db-dev',
+          revision: 1,
+          dryRun: true,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(preview);
+      expect(
+        services.releaseBindingRevisionService.rollbackResource,
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'my-namespace',
+          bindingName: 'db-dev',
+          revision: 1,
+          dryRun: true,
+        },
+        'mock-user-token',
+      );
+      expect(
+        services.releaseBindingRevisionService.rollback,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ namespaceName: 'ns', revision: 2 }, 'namespaceName and bindingName'],
+      [{ namespaceName: 'ns', bindingName: 'b', revision: -1 }, 'revision'],
+      [
+        { namespaceName: 'ns', bindingName: 'b', revision: 2, dryRun: 1 },
+        'dryRun',
+      ],
+    ])('returns 400 for %j', async (body, message) => {
+      const response = await request(app)
+        .post('/rollback-resource-release-binding')
+        .send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.message).toContain(message);
+      expect(
+        services.releaseBindingRevisionService.rollbackResource,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('passes a conflict code through to the client', async () => {
+      const { ConflictError } = jest.requireActual('@backstage/errors');
+      services.releaseBindingRevisionService.rollbackResource.mockRejectedValue(
+        Object.assign(new ConflictError('binding changed'), {
+          code: 'CONCURRENT_MODIFICATION',
+        }),
+      );
+
+      const response = await request(app)
+        .post('/rollback-resource-release-binding')
+        .send({ namespaceName: 'ns', bindingName: 'db-dev', revision: 1 });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toMatchObject({
+        code: 'CONCURRENT_MODIFICATION',
       });
     });
   });

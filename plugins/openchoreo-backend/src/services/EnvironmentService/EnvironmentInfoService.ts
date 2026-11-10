@@ -2863,7 +2863,7 @@ export class EnvironmentInfoService implements EnvironmentService {
    *
    * @param request.componentName - Name of the component to filter releases by
    * @param request.namespaceName - Name of the namespace
-   * @returns Paginated list of component releases (frozen workload snapshots)
+   * @returns Every component release across all pages (frozen workload snapshots)
    */
   async listComponentReleases(
     request: {
@@ -2884,24 +2884,28 @@ export class EnvironmentInfoService implements EnvironmentService {
         logger: this.logger,
       });
 
-      const { data, error, response } = await client.GET(
-        '/api/v1/namespaces/{namespaceName}/componentreleases',
-        {
-          params: {
-            path: { namespaceName: request.namespaceName },
-            query: { component: request.componentName },
-          },
-        },
+      // Fetch every page so releases past the first page are not mistaken
+      // for deleted ones by the revision panel.
+      const items = await fetchAllPages(cursor =>
+        client
+          .GET('/api/v1/namespaces/{namespaceName}/componentreleases', {
+            params: {
+              path: { namespaceName: request.namespaceName },
+              query: { component: request.componentName, limit: 100, cursor },
+            },
+          })
+          .then(res => {
+            assertApiResponse(res, 'list component releases');
+            return res.data;
+          }),
       );
-
-      assertApiResponse({ data, error, response }, 'list component releases');
 
       const totalTime = Date.now() - startTime;
       this.logger.debug(
         `Component releases listed for ${request.componentName}: Total: ${totalTime}ms`,
       );
 
-      return data;
+      return { items, pagination: {} };
     } catch (error: unknown) {
       const totalTime = Date.now() - startTime;
       this.logger.error(

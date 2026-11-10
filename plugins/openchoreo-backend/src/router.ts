@@ -31,6 +31,7 @@ import {
   ProjectReleaseInfoService,
   type ProjectReleaseSchemaSection,
 } from './services/ProjectReleaseService/ProjectReleaseInfoService';
+import { ReleaseBindingRevisionService } from './services/ReleaseBindingRevisionService/ReleaseBindingRevisionService';
 import { PlatformResourceService } from './services/PlatformResourceService/PlatformResourceService';
 import { WirelogsInfoService } from './services/WirelogsService/WirelogsInfoService';
 import { VersionService } from './services/VersionService/VersionService';
@@ -87,6 +88,27 @@ const VALID_PLATFORM_RESOURCE_KINDS = [
 export type PlatformResourceKind =
   (typeof VALID_PLATFORM_RESOURCE_KINDS)[number];
 
+/** The longest rollback message the OpenChoreo API accepts, in characters. */
+const MAX_ROLLBACK_MESSAGE_LENGTH = 1024;
+
+/**
+ * Validates a rollback request's optional message. Returns it without
+ * surrounding whitespace, or undefined when none was given.
+ */
+function parseRollbackMessage(message: unknown): string | undefined {
+  if (message === undefined || message === null) return undefined;
+  if (typeof message !== 'string') {
+    throw new InputError('message must be a string');
+  }
+  const trimmed = message.trim();
+  if (Array.from(trimmed).length > MAX_ROLLBACK_MESSAGE_LENGTH) {
+    throw new InputError(
+      `message must be at most ${MAX_ROLLBACK_MESSAGE_LENGTH} characters`,
+    );
+  }
+  return trimmed || undefined;
+}
+
 export async function createRouter({
   environmentInfoService,
   cellDiagramInfoService,
@@ -102,6 +124,7 @@ export async function createRouter({
   clusterResourceTypeInfoService,
   resourceReleaseInfoService,
   projectReleaseInfoService,
+  releaseBindingRevisionService,
   secretReferencesInfoService,
   secretsService,
   authzService,
@@ -132,6 +155,7 @@ export async function createRouter({
   clusterResourceTypeInfoService: ClusterResourceTypeInfoService;
   resourceReleaseInfoService: ResourceReleaseInfoService;
   projectReleaseInfoService: ProjectReleaseInfoService;
+  releaseBindingRevisionService: ReleaseBindingRevisionService;
   secretReferencesInfoService: SecretReferencesService;
   secretsService: SecretsService;
   authzService: AuthzService;
@@ -1285,6 +1309,183 @@ export async function createRouter({
       ),
     );
   });
+
+  router.get('/release-binding-revisions', async (req, res) => {
+    const { namespaceName, componentName, environment } = req.query;
+
+    if (!namespaceName || !componentName || !environment) {
+      throw new InputError(
+        'namespaceName, componentName and environment are required query parameters',
+      );
+    }
+
+    const userToken = getUserTokenFromRequest(req);
+
+    res.json(
+      await releaseBindingRevisionService.listRevisions(
+        {
+          namespaceName: namespaceName as string,
+          componentName: componentName as string,
+          environment: environment as string,
+        },
+        userToken,
+      ),
+    );
+  });
+
+  router.post('/rollback-release-binding', requireAuth, async (req, res) => {
+    const { namespaceName, bindingName, revision, dryRun, message } = req.body;
+
+    if (!namespaceName || !bindingName) {
+      throw new InputError(
+        'namespaceName and bindingName are required in request body',
+      );
+    }
+    if (!Number.isInteger(revision) || revision < 1) {
+      throw new InputError('revision must be a positive integer');
+    }
+    if (dryRun !== undefined && typeof dryRun !== 'boolean') {
+      throw new InputError('dryRun must be a boolean');
+    }
+    const rollbackMessage = parseRollbackMessage(message);
+
+    const userToken = getUserTokenFromRequest(req);
+
+    res.json(
+      await releaseBindingRevisionService.rollback(
+        {
+          namespaceName: namespaceName as string,
+          bindingName: bindingName as string,
+          revision,
+          dryRun: dryRun ?? false,
+          message: rollbackMessage,
+        },
+        userToken,
+      ),
+    );
+  });
+
+  router.post(
+    '/delete-release-binding-revision',
+    requireAuth,
+    async (req, res) => {
+      const { namespaceName, bindingName, revisionName, dryRun } = req.body;
+
+      if (!namespaceName || !bindingName || !revisionName) {
+        throw new InputError(
+          'namespaceName, bindingName and revisionName are required in request body',
+        );
+      }
+      if (dryRun !== undefined && typeof dryRun !== 'boolean') {
+        throw new InputError('dryRun must be a boolean');
+      }
+
+      const userToken = getUserTokenFromRequest(req);
+
+      res.json(
+        await releaseBindingRevisionService.deleteRevision(
+          {
+            namespaceName: namespaceName as string,
+            bindingName: bindingName as string,
+            revisionName: revisionName as string,
+            dryRun: dryRun ?? false,
+          },
+          userToken,
+        ),
+      );
+    },
+  );
+
+  router.get('/resource-release-binding-revisions', async (req, res) => {
+    const { namespaceName, resourceName, environment } = req.query;
+
+    if (!namespaceName || !resourceName || !environment) {
+      throw new InputError(
+        'namespaceName, resourceName and environment are required query parameters',
+      );
+    }
+
+    const userToken = getUserTokenFromRequest(req);
+
+    res.json(
+      await releaseBindingRevisionService.listResourceRevisions(
+        {
+          namespaceName: namespaceName as string,
+          resourceName: resourceName as string,
+          environment: environment as string,
+        },
+        userToken,
+      ),
+    );
+  });
+
+  router.post(
+    '/rollback-resource-release-binding',
+    requireAuth,
+    async (req, res) => {
+      const { namespaceName, bindingName, revision, dryRun, message } =
+        req.body;
+
+      if (!namespaceName || !bindingName) {
+        throw new InputError(
+          'namespaceName and bindingName are required in request body',
+        );
+      }
+      if (!Number.isInteger(revision) || revision < 1) {
+        throw new InputError('revision must be a positive integer');
+      }
+      if (dryRun !== undefined && typeof dryRun !== 'boolean') {
+        throw new InputError('dryRun must be a boolean');
+      }
+      const rollbackMessage = parseRollbackMessage(message);
+
+      const userToken = getUserTokenFromRequest(req);
+
+      res.json(
+        await releaseBindingRevisionService.rollbackResource(
+          {
+            namespaceName: namespaceName as string,
+            bindingName: bindingName as string,
+            revision,
+            dryRun: dryRun ?? false,
+            message: rollbackMessage,
+          },
+          userToken,
+        ),
+      );
+    },
+  );
+
+  router.post(
+    '/delete-resource-release-binding-revision',
+    requireAuth,
+    async (req, res) => {
+      const { namespaceName, bindingName, revisionName, dryRun } = req.body;
+
+      if (!namespaceName || !bindingName || !revisionName) {
+        throw new InputError(
+          'namespaceName, bindingName and revisionName are required in request body',
+        );
+      }
+      if (dryRun !== undefined && typeof dryRun !== 'boolean') {
+        throw new InputError('dryRun must be a boolean');
+      }
+
+      const userToken = getUserTokenFromRequest(req);
+
+      res.json(
+        await releaseBindingRevisionService.deleteResourceRevision(
+          {
+            namespaceName: namespaceName as string,
+            bindingName: bindingName as string,
+            revisionName: revisionName as string,
+            dryRun: dryRun ?? false,
+          },
+          userToken,
+        ),
+      );
+    },
+  );
 
   router.get('/component-releases', async (req, res) => {
     const { componentName, namespaceName } = req.query;
