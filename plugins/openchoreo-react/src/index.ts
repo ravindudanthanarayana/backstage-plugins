@@ -4,6 +4,19 @@
  * Shared React components, hooks, and utilities for OpenChoreo Backstage plugins
  */
 
+// APIs
+export {
+  openChoreoTokenApiRef,
+  type OpenChoreoTokenApi,
+  type OpenChoreoTokenRequestOptions,
+  type OpenChoreoSessionState,
+} from './api/openChoreoTokenApiRef';
+export {
+  openChoreoFetchApiRef,
+  OpenChoreoScopedFetchApi,
+  type OpenChoreoScopedFetchApiOptions,
+} from './api/openChoreoFetchApi';
+
 // Components
 export { SummaryWidgetWrapper } from './components/SummaryWidgetWrapper';
 export {
@@ -86,6 +99,7 @@ export {
   type ProjectOption,
   type ComponentOption,
   type EndpointOption,
+  type ReleaseLineOption,
 } from './components/DependencyEditor';
 export {
   DependencyList,
@@ -168,10 +182,35 @@ export {
   type ExtraContextMenuItem,
 } from './components/OpenChoreoEntityLayout';
 export {
+  ReleaseLineProvider,
+  ReleaseLineContext,
+  useReleaseLine,
+  useEntityPagePath,
+  useReleaseLineComponentEntity,
+  type ReleaseLineContextValue,
+  type ReleaseLineProviderProps,
+  triggerReleaseLineBuild,
+  fetchReleaseLineResource,
+  updateReleaseLineResource,
+} from './components/ReleaseLine';
+export {
   VirtualizedLogList,
   type VirtualizedLogListProps,
 } from './components/VirtualizedLogList';
 export { makeColumnStyle } from './components/VirtualizedLogList/columnStyle';
+export {
+  TokenFilterBar,
+  buildPathAliases,
+  parseFilterDraft,
+  resolvePath,
+  type TokenFilterBarProps,
+  type FilterFieldDef,
+  type FilterToken,
+  type FilterValueOption,
+  type FilterValuesProvider,
+  type FilterValuesRequest,
+  type FilterValuesState,
+} from './components/TokenFilterBar';
 
 // Hooks
 export {
@@ -187,6 +226,7 @@ export {
   useAutoLoadWhenEmpty,
   type UseAutoLoadWhenEmptyOptions,
 } from './hooks/useAutoLoadWhenEmpty';
+export { useQueryParams } from './hooks/useQueryParams';
 export {
   useEntityAnnotation,
   useHasAnnotation,
@@ -204,6 +244,8 @@ export {
   useAuthzEnabled,
   useSecretManagementEnabled,
   useAssistantEnabled,
+  useDeliveryInsightsEnabled,
+  useCostInsightsEnabled,
 } from './hooks/useOpenChoreoFeatures';
 export {
   useComponentEntityDetails,
@@ -212,7 +254,9 @@ export {
 } from './hooks/useComponentEntityDetails';
 export {
   useSecretReferences,
+  useNamespaceSecretReferences,
   filterSecretReferencesForEnvDataPlane,
+  filterSecretReferencesForObservabilityPlane,
   type UseSecretReferencesResult,
   type SecretReference,
   type SecretDataSourceInfo,
@@ -334,9 +378,17 @@ export {
   type UseLogsPermissionResult,
 } from './hooks/useLogsPermission';
 export {
+  usePlatformLogsPermission,
+  type UsePlatformLogsPermissionResult,
+} from './hooks/usePlatformLogsPermission';
+export {
   useEventsPermission,
   type UseEventsPermissionResult,
 } from './hooks/useEventsPermission';
+export {
+  useAuditLogsPermission,
+  type UseAuditLogsPermissionResult,
+} from './hooks/useAuditLogsPermission';
 export {
   useMetricsPermission,
   type UseMetricsPermissionResult,
@@ -719,3 +771,15 @@ export {
   type UseProjectEnvironmentsResult,
   type ProjectEnvironmentsStatus,
 } from './hooks/useProjectEnvironments';
+
+// Assistant integration contract — the optional slots an AI assistant can
+// fill across the portal shell and plugins. Contract only; implementations
+// are registered by host apps.
+export {
+  portalAssistantIntegrationApiRef,
+  usePortalAssistant,
+  BuildFailureNotifierSlot,
+  type PortalAssistantIntegration,
+  type InvestigateScope,
+  type RenderInvestigateAction,
+} from './api/assistantIntegration';

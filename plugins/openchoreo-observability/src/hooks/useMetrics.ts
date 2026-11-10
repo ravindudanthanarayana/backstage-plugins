@@ -7,9 +7,20 @@ import {
   calculateTimeRange,
   useOpenChoreoQuery,
 } from '@openchoreo/backstage-plugin-react';
+import {
+  componentDefaultReleaseLine,
+  useSelectedReleaseLine,
+} from './useSelectedReleaseLine';
+import { calculateStep } from '../components/Metrics/utils';
 
 export function useMetrics(
   filters: Filters,
+  /**
+   * A Component entity scopes the query to that component. A Project (System)
+   * entity carries no component annotation, so the component is omitted from
+   * `searchScope` and the observer returns the project-wide aggregate in the
+   * same schema — which is what the project Metrics tab renders.
+   */
   entity: Entity,
   namespaceName: string,
   project: string,
@@ -24,6 +35,9 @@ export function useMetrics(
   enabled: boolean = true,
 ) {
   const observabilityApi = useApi(observabilityApiRef);
+  const releaseLine = useSelectedReleaseLine(
+    componentDefaultReleaseLine(entity),
+  );
 
   const componentName =
     entity.metadata.annotations?.[CHOREO_ANNOTATIONS.COMPONENT];
@@ -36,17 +50,16 @@ export function useMetrics(
       namespaceName,
       project,
       filters.environment?.name ?? null,
+      // `null` for the project-wide query keeps it in its own cache slot rather
+      // than colliding with a component-scoped one.
       componentName ?? null,
+      releaseLine ?? null,
       filters.timeRange,
       filters.customStartTime,
       filters.customEndTime,
       metricType,
     ],
     () => {
-      if (!componentName) {
-        throw new Error('Component name not found in entity annotations');
-      }
-
       const { startTime, endTime } = calculateTimeRange(filters.timeRange, {
         startTime: filters.customStartTime,
         endTime: filters.customEndTime,
@@ -58,15 +71,11 @@ export function useMetrics(
         componentName,
         namespaceName,
         project,
-        { startTime, endTime, step, type: metricType },
+        { startTime, endTime, step, type: metricType, releaseLine },
       );
     },
     {
-      enabled:
-        enabled &&
-        !!filters.environment &&
-        !!filters.timeRange &&
-        !!componentName,
+      enabled: enabled && !!filters.environment && !!filters.timeRange,
     },
   );
 
@@ -78,46 +87,4 @@ export function useMetrics(
     fetchMetrics: (_reset: boolean = false) => refetch(),
     refresh: refetch,
   };
-}
-
-function calculateStep(
-  timeRange: string,
-  startTime?: string,
-  endTime?: string,
-): string {
-  switch (timeRange) {
-    case '10m':
-      return '15s';
-    case '30m':
-      return '30s';
-    case '1h':
-      return '1m';
-    case '24h':
-      return '5m';
-    case '7d':
-      return '30m';
-    case '14d':
-      return '1h';
-    case '30d':
-      return '2h';
-    case 'custom':
-      return stepForCustomRange(startTime, endTime);
-    default:
-      return '1m';
-  }
-}
-
-/** Pick a step that yields ~120-720 data points for the chosen window. */
-function stepForCustomRange(startTime?: string, endTime?: string): string {
-  if (!startTime || !endTime) return '1m';
-  const durationMs =
-    new Date(endTime).getTime() - new Date(startTime).getTime();
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return '1m';
-  const minutes = durationMs / (60 * 1000);
-  if (minutes <= 30) return '15s';
-  if (minutes <= 120) return '30s';
-  if (minutes <= 24 * 60) return '5m';
-  if (minutes <= 7 * 24 * 60) return '30m';
-  if (minutes <= 14 * 24 * 60) return '1h';
-  return '2h';
 }

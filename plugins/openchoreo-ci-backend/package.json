@@ -1,14 +1,14 @@
 {
   "name": "@openchoreo/backstage-plugin-openchoreo-ci-backend",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
+  "description": "Backstage backend plugin powering the OpenChoreo CI tab: workflow runs, run details, and build triggering.",
   "license": "Apache-2.0",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "publishConfig": {
     "access": "public",
     "main": "dist/index.cjs.js",
-    "types": "dist/index.d.ts",
-    "registry": "https://npm.pkg.github.com"
+    "types": "dist/index.d.ts"
   },
   "repository": {
     "type": "git",

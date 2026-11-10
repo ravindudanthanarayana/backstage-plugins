@@ -55,6 +55,21 @@ export class ObservabilityService {
     );
   }
 
+  /**
+   * Resolves the observer URL for a platform-wide read — the audit trail,
+   * which has no environment to resolve through — as the API advertises it.
+   * `auditLogsEnabled` is `false` when the API reports the trail cannot be
+   * queried.
+   */
+  async resolvePlatformUrls(userToken?: string): Promise<{
+    observerUrl?: string;
+    auditLogsEnabled?: boolean;
+  }> {
+    const { observerUrl, auditLogsEnabled } =
+      await this.resolver.resolveForPlatform(userToken);
+    return { observerUrl, auditLogsEnabled };
+  }
+
   async getReleaseBinding(
     namespaceName: string,
     bindingName: string,
@@ -86,6 +101,48 @@ export class ObservabilityService {
       '/api/v1/namespaces/{namespaceName}/releasebindings/{releaseBindingName}',
       {
         params: { path: { namespaceName, releaseBindingName: bindingName } },
+        body,
+      },
+    );
+  }
+
+  async getResourceReleaseBinding(
+    namespaceName: string,
+    bindingName: string,
+    userToken?: string,
+  ) {
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      logger: this.logger,
+      token: userToken,
+    });
+    return client.GET(
+      '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+      {
+        params: {
+          path: { namespaceName, resourceReleaseBindingName: bindingName },
+        },
+      },
+    );
+  }
+
+  async updateResourceReleaseBinding(
+    namespaceName: string,
+    bindingName: string,
+    body: any,
+    userToken?: string,
+  ) {
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      logger: this.logger,
+      token: userToken,
+    });
+    return client.PUT(
+      '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+      {
+        params: {
+          path: { namespaceName, resourceReleaseBindingName: bindingName },
+        },
         body,
       },
     );

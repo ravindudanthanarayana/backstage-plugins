@@ -19,7 +19,8 @@ import {
   ForbiddenState,
   useProjectEnvironments,
 } from '@openchoreo/backstage-plugin-react';
-import { EnvironmentsStatusNotice } from '../common';
+import { EnvironmentsStatusNotice, ReleaseLineFilter } from '../common';
+import { componentDefaultReleaseLine } from '../../hooks/useSelectedReleaseLine';
 import { RefreshOverlay } from '@openchoreo/backstage-design-system';
 import { useRuntimeLogsStyles } from './styles';
 import { LOG_LEVELS } from './types';
@@ -236,6 +237,15 @@ const ObservabilityRuntimeLogsContent = ({
         environments={environments}
         environmentsLoading={environmentsLoading}
         disabled={logsLoading}
+        releaseLineFilter={
+          <ReleaseLineFilter
+            gridItem
+            defaultLine={componentDefaultReleaseLine(entity)}
+            namespace={namespace}
+            component={componentName}
+            disabled={logsLoading}
+          />
+        }
       />
 
       {logsError && renderError(logsError)}

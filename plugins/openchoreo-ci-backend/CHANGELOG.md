@@ -1,5 +1,58 @@
 # @openchoreo/backstage-plugin-openchoreo-ci-backend
 
+## 2.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [1cec15b]
+  - @openchoreo/openchoreo-client-node@2.0.0-next.2
+  - @openchoreo/backstage-plugin-common@2.0.0-next.2
+
+## 1.4.0-m.1
+
+### Patch Changes
+
+- c67978a: Replace Backstage CLI boilerplate in published package descriptions and READMEs with
+  real ones, so the npm listings describe what each package does and point at the install
+  guide. No code changes.
+- Updated dependencies [9e3a840]
+- Updated dependencies [f5ca212]
+- Updated dependencies [44795b9]
+- Updated dependencies [c67978a]
+- Updated dependencies [cdc4c6e]
+  - @openchoreo/backstage-plugin-common@2.0.0-next.0
+  - @openchoreo/openchoreo-client-node@2.0.0-next.0
+  - @openchoreo/openchoreo-auth@2.0.0-next.0
+
+## 1.3.0
+
+### Patch Changes
+
+- Updated dependencies [4c7f96c]
+- Updated dependencies [a3e7d3f]
+- Updated dependencies [c234b33]
+- Updated dependencies [a958b80]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [0a7d538]
+- Updated dependencies [435463f]
+  - @openchoreo/backstage-plugin-common@1.3.0
+  - @openchoreo/openchoreo-client-node@1.3.0
+  - @openchoreo/openchoreo-auth@1.3.0
+
+## 1.3.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [4c7f96c]
+- Updated dependencies [a3e7d3f]
+- Updated dependencies [c234b33]
+- Updated dependencies [a958b80]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [0a7d538]
+- Updated dependencies [435463f]
+  - @openchoreo/backstage-plugin-common@1.3.0-next.0
+  - @openchoreo/openchoreo-client-node@1.3.0-next.0
+
 ## 1.2.0
 
 ### Minor Changes

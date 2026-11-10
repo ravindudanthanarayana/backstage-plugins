@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  useApi,
-  discoveryApiRef,
-  fetchApiRef,
-} from '@backstage/core-plugin-api';
+import { useApi, discoveryApiRef } from '@backstage/core-plugin-api';
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import type {
   WirelogEvent,
   WirelogStreamStatus,
@@ -15,6 +12,8 @@ interface UseWirelogsStreamArgs {
   projectName: string | undefined;
   environmentName: string | undefined;
   componentName?: string | undefined;
+  /** `main` for the main line; undefined streams every line. */
+  releaseLine?: string | undefined;
   maxBuffer?: number;
 }
 
@@ -58,10 +57,11 @@ export function useWirelogsStream({
   projectName,
   environmentName,
   componentName,
+  releaseLine,
   maxBuffer = DEFAULT_MAX_BUFFER,
 }: UseWirelogsStreamArgs): UseWirelogsStreamResult {
   const discovery = useApi(discoveryApiRef);
-  const fetchApi = useApi(fetchApiRef);
+  const fetchApi = useApi(openChoreoFetchApiRef);
 
   const [flows, setFlows] = useState<WirelogEvent[]>([]);
   const [status, setStatus] = useState<WirelogStreamStatus>('idle');
@@ -130,6 +130,11 @@ export function useWirelogsStream({
         url.searchParams.set('environmentName', environmentName);
         if (componentName) {
           url.searchParams.set('componentName', componentName);
+          if (releaseLine) {
+            url.searchParams.set('releaseLine', releaseLine);
+          } else {
+            url.searchParams.set('allReleaseLines', 'true');
+          }
         }
 
         const response = await fetchApi.fetch(url.toString(), {
@@ -224,20 +229,21 @@ export function useWirelogsStream({
     projectName,
     environmentName,
     componentName,
+    releaseLine,
     maxBuffer,
     markClosedReason,
   ]);
 
   useEffect(() => () => stop(), [stop]);
 
-  // Reset state when the user switches environment/component.
+  // Reset state when the user switches environment/component/release line.
   useEffect(() => {
     if (abortRef.current) {
       stop();
     }
     clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [namespaceName, projectName, environmentName, componentName]);
+  }, [namespaceName, projectName, environmentName, componentName, releaseLine]);
 
   return {
     flows,

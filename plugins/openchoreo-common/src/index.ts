@@ -1,4 +1,28 @@
 export {
+  isOpenChoreoManagedEntity,
+  isOpenChoreoManagedOfKind,
+  hasReleaseLines,
+  isOpenChoreoReleaseLine,
+} from './entityFilters';
+export {
+  mergeOverrides,
+  diffOverrides,
+  mergeTraits,
+  diffTraits,
+  isInheritedTrait,
+  traitKey,
+  type ReleaseLineTrait,
+} from './releaseLineOverrides';
+export { releaseLineNodeId, parseReleaseLineNodeId } from './releaseLineNode';
+export {
+  MAIN_RELEASE_LINE,
+  isMainReleaseLine,
+  isSameReleaseLine,
+  reservedReleaseLineNameError,
+  toStoredReleaseLine,
+} from './mainReleaseLine';
+
+export {
   CHOREO_ANNOTATIONS,
   CHOREO_LABELS,
   GENERIC_SECRET_TYPE_VALUE,
@@ -19,6 +43,8 @@ export {
   RELATION_BUILDS,
   RELATION_NOTIFIES,
   RELATION_NOTIFIED_BY,
+  OPENCHOREO_TOKEN_HEADER,
+  OPENCHOREO_DIRECT_HEADER,
 } from './constants';
 
 // Permissions
@@ -76,6 +102,8 @@ export {
   openchoreoClusterRoleMappingDeletePermission,
   openchoreoExecPermission,
   openchoreoLogsViewPermission,
+  openchoreoPlatformLogsViewPermission,
+  openchoreoAuditLogsViewPermission,
   openchoreoEventsViewPermission,
   openchoreoAlertsViewPermission,
   openchoreoWirelogsViewPermission,
@@ -256,6 +284,10 @@ export type {
   DeployReleaseRequest,
   PatchReleaseBindingRequest,
   CreateComponentReleaseRequest,
+  ReleaseLineSummary,
+  ReleaseLineEnvironmentSummary,
+  ReleaseLineOverrides,
+  ReleaseLineResource,
 } from './types/bff-types';
 
 // Convenience aliases for backwards compatibility

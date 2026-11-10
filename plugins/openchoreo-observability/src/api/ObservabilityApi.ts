@@ -16,12 +16,34 @@ import {
   IncidentSummary,
   FinOpsReportSummary,
   FinOpsReportDetailed,
+  DoraGranularity,
+  DoraMetricName,
+  DoraMetricsResponse,
+  DoraDeploymentsResponse,
+  DoraSearchScope,
   CostItem,
   CostRecommendationItem,
 } from '../types';
 import { LogsResponse } from '../components/RuntimeLogs/types';
+import {
+  PlatformLogFilterValuesQueryOptions,
+  PlatformLogFilterValuesResponse,
+  PlatformLogsQueryOptions,
+  PlatformLogsResponse,
+} from '../components/PlatformLogs/types';
 import { EventsResponse } from '../components/RuntimeEvents/types';
+import {
+  AuditLogFilterValuesRequest,
+  AuditLogFilterValuesResponse,
+  AuditLogsQueryRequest,
+  AuditLogsResponse,
+} from '../components/AuditLogs/types';
 import { ObserverUrlCache } from './ObserverUrlCache';
+import {
+  AuditFilterValuesNotSupportedError,
+  AuditLogsForbiddenError,
+  AuditLogsNotSupportedError,
+} from './AuditLogsErrors';
 
 export interface ObservabilityApi {
   getRuntimeLogs(
@@ -30,6 +52,8 @@ export interface ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -39,12 +63,41 @@ export interface ObservabilityApi {
     },
   ): Promise<LogsResponse>;
 
+  /**
+   * Query platform (system component) logs from a specific observability plane.
+   *
+   * Takes the observer URL directly rather than resolving it from a
+   * namespace+environment pair like every other method here: platform logs are not
+   * scoped to an environment, so there is nothing for `ObserverUrlCache` to resolve.
+   * The caller picks the plane (its `spec.observerURL` is on the catalog entity).
+   */
+  getPlatformLogs(
+    observerUrl: string,
+    options?: PlatformLogsQueryOptions,
+  ): Promise<PlatformLogsResponse>;
+
+  /**
+   * List the distinct values one platform logs filter can take, so a picker can offer
+   * the values reachable in the whole matching set rather than only those that appear
+   * in the page of records already loaded.
+   *
+   * Resolves to `null` when this plane cannot answer - an observer predating the
+   * endpoint, or a logs adapter that cannot aggregate. That is a different thing from
+   * an empty list, and the caller is expected to fall back rather than show nothing.
+   */
+  getPlatformLogFilterValues(
+    observerUrl: string,
+    options: PlatformLogFilterValuesQueryOptions,
+  ): Promise<PlatformLogFilterValuesResponse | null>;
+
   getRuntimeEvents(
     namespaceName: string,
     projectName: string,
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -54,10 +107,12 @@ export interface ObservabilityApi {
 
   getMetrics(
     environmentName: string,
-    componentName: string,
+    componentName: string | undefined,
     namespaceName: string,
     projectName: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       step?: string;
@@ -71,6 +126,8 @@ export interface ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -89,6 +146,8 @@ export interface ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
     },
@@ -132,6 +191,8 @@ export interface ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       limit?: number;
@@ -148,6 +209,8 @@ export interface ObservabilityApi {
     environmentName: string,
     componentName: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       limit?: number;
@@ -187,12 +250,34 @@ export interface ObservabilityApi {
     namespaceName: string,
   ): Promise<FinOpsReportDetailed>;
 
+  getDoraMetrics(
+    scope: DoraSearchScope,
+    options: {
+      startTime: string;
+      endTime: string;
+      granularity?: DoraGranularity;
+      metrics?: DoraMetricName[];
+    },
+  ): Promise<DoraMetricsResponse>;
+
+  getDoraDeployments(
+    scope: DoraSearchScope,
+    options: {
+      startTime: string;
+      endTime: string;
+      limit?: number;
+      sortOrder?: 'asc' | 'desc';
+    },
+  ): Promise<DoraDeploymentsResponse>;
+
   getCosts(
     namespaceName: string,
     environmentName: string,
     options?: {
       project?: string;
       component?: string;
+      /** Restricts the result to this release line; requires `component`. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       granularity?: string;
@@ -205,10 +290,26 @@ export interface ObservabilityApi {
     options?: {
       project?: string;
       component?: string;
+      /** Restricts the result to this release line; requires `component`. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
     },
   ): Promise<{ items: CostRecommendationItem[] }>;
+
+  /**
+   * Queries the audit trail. Cluster-scoped: the observer evaluates
+   * `auditlogs:view` before reading any of the tenancy filters in the body.
+   */
+  queryAuditLogs(request: AuditLogsQueryRequest): Promise<AuditLogsResponse>;
+
+  /**
+   * Lists the distinct values one audit filter takes under a query — what a
+   * filter picker is populated from. One filter per request, by design.
+   */
+  queryAuditLogFilterValues(
+    request: AuditLogFilterValuesRequest,
+  ): Promise<AuditLogFilterValuesResponse>;
 }
 
 export const observabilityApiRef = createApiRef<ObservabilityApi>({
@@ -216,6 +317,77 @@ export const observabilityApiRef = createApiRef<ObservabilityApi>({
 });
 
 const DIRECT_HEADER = { 'x-openchoreo-direct': 'true' };
+
+/**
+ * The observer answered `501` to a cost query scoped to a release line: the
+ * installed FinOps module cannot filter costs by line.
+ */
+export class CostsReleaseLineNotSupportedError extends Error {
+  constructor() {
+    super(
+      'Cost data for a single release line is not supported by the installed FinOps module',
+    );
+    this.name = 'CostsReleaseLineNotSupportedError';
+  }
+}
+
+/**
+ * The release line part of a component search scope. Without a line, the portal
+ * covers every line of the component, which the observer does only when asked:
+ * on its own, a component scope covers the component's main line.
+ */
+function releaseLineScope(
+  component: string | undefined,
+  releaseLine: string | undefined,
+): { releaseLine?: string; allReleaseLines?: boolean } {
+  if (!component) return {};
+  return releaseLine ? { releaseLine } : { allReleaseLines: true };
+}
+
+/** Scopes a DORA query to its release line, or to every line of its component. */
+function withReleaseLineScope(scope: DoraSearchScope): DoraSearchScope {
+  const { releaseLine, ...rest } = scope;
+  return { ...rest, ...releaseLineScope(scope.component, releaseLine) };
+}
+
+/**
+ * Writes the filters shared by the platform logs record query and its filter values
+ * query onto a URL.
+ *
+ * Shared rather than duplicated because the contract is that the two take the same
+ * parameters: a filter values answer only describes the records the log query would
+ * return if both spell the query the same way.
+ *
+ * Multi-value filters are comma-separated, matching the endpoints'
+ * `style: form, explode: false`. An empty list is not a filter, so it is omitted
+ * entirely rather than sent as an empty value. The label selector goes over the wire as
+ * `kubectl -l` spells it; plane attribution is expressed there rather than as its own
+ * parameter.
+ */
+function setPlatformLogsRecordParams(
+  url: URL,
+  options: Omit<PlatformLogsQueryOptions, 'limit' | 'sortOrder'>,
+): void {
+  const listParams: Array<[string, string[] | undefined]> = [
+    ['clusterInstance', options.clusterInstances],
+    ['namespace', options.namespaces],
+    ['podName', options.podNames],
+    ['containerName', options.containerNames],
+    ['logLevels', options.logLevels],
+  ];
+  for (const [name, values] of listParams) {
+    if (values?.length) {
+      url.searchParams.set(name, values.join(','));
+    }
+  }
+
+  if (options.labels) {
+    url.searchParams.set('labels', options.labels);
+  }
+  if (options.searchQuery) {
+    url.searchParams.set('searchPhrase', options.searchQuery);
+  }
+}
 
 export class ObservabilityClient implements ObservabilityApi {
   private readonly fetchApi: FetchApi;
@@ -228,10 +400,12 @@ export class ObservabilityClient implements ObservabilityApi {
 
   async getMetrics(
     environmentName: string,
-    componentName: string,
+    componentName: string | undefined,
     namespaceName: string,
     projectName: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       step?: string;
@@ -246,8 +420,9 @@ export class ObservabilityClient implements ObservabilityApi {
     const searchScope = {
       namespace: namespaceName,
       project: projectName,
-      component: componentName,
       environment: environmentName,
+      ...(componentName ? { component: componentName } : {}),
+      ...releaseLineScope(componentName, options?.releaseLine),
     };
 
     const baseBody = {
@@ -324,6 +499,8 @@ export class ObservabilityClient implements ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -355,6 +532,7 @@ export class ObservabilityClient implements ObservabilityApi {
             project: projectName,
             ...(componentName ? { component: componentName } : {}),
             environment: environmentName,
+            ...releaseLineScope(componentName, options?.releaseLine),
           },
         }),
       },
@@ -396,6 +574,8 @@ export class ObservabilityClient implements ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
     },
@@ -427,6 +607,7 @@ export class ObservabilityClient implements ObservabilityApi {
             project: projectName,
             ...(componentName ? { component: componentName } : {}),
             environment: environmentName,
+            ...releaseLineScope(componentName, options?.releaseLine),
           },
         }),
       },
@@ -621,6 +802,8 @@ export class ObservabilityClient implements ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       limit?: number;
@@ -650,6 +833,7 @@ export class ObservabilityClient implements ObservabilityApi {
             namespace: namespaceName,
             project: projectName,
             ...(componentName ? { component: componentName } : {}),
+            ...releaseLineScope(componentName, options?.releaseLine),
             environment: environmentName,
           },
         }),
@@ -687,6 +871,7 @@ export class ObservabilityClient implements ObservabilityApi {
               i.incidentTriggerAiCostAnalysis ?? false,
             projectName: i.labels?.projectName,
             componentName: i.labels?.componentName,
+            releaseLineName: i.labels?.releaseLineName,
             environmentName: i.labels?.environmentName,
             namespaceName: i.labels?.namespaceName,
           }),
@@ -701,6 +886,8 @@ export class ObservabilityClient implements ObservabilityApi {
     environmentName: string,
     componentName: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       limit?: number;
@@ -730,6 +917,7 @@ export class ObservabilityClient implements ObservabilityApi {
             namespace: namespaceName,
             project: projectName,
             component: componentName,
+            ...releaseLineScope(componentName, options?.releaseLine),
             environment: environmentName,
           },
         }),
@@ -762,6 +950,7 @@ export class ObservabilityClient implements ObservabilityApi {
           sourceMetric: a.metadata?.alertRule?.source?.metric,
           projectName: a.metadata?.labels?.projectName,
           componentName: a.metadata?.labels?.componentName,
+          releaseLineName: a.metadata?.labels?.releaseLineName,
           environmentName: a.metadata?.labels?.environmentName,
           namespaceName: a.metadata?.labels?.namespaceName,
           notificationChannels: a.notificationChannels ?? [],
@@ -778,6 +967,8 @@ export class ObservabilityClient implements ObservabilityApi {
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -813,6 +1004,7 @@ export class ObservabilityClient implements ObservabilityApi {
             project: projectName,
             ...(componentName ? { component: componentName } : {}),
             environment: environmentName,
+            ...releaseLineScope(componentName, options?.releaseLine),
           },
         }),
       },
@@ -833,12 +1025,118 @@ export class ObservabilityClient implements ObservabilityApi {
     return data;
   }
 
+  async getPlatformLogs(
+    observerUrl: string,
+    options?: PlatformLogsQueryOptions,
+  ): Promise<PlatformLogsResponse> {
+    const url = new URL(`${observerUrl}/api/v1alpha1/platform-logs`);
+
+    url.searchParams.set(
+      'startTime',
+      options?.startTime ?? new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    );
+    url.searchParams.set(
+      'endTime',
+      options?.endTime ?? new Date().toISOString(),
+    );
+    url.searchParams.set('limit', String(options?.limit ?? 100));
+    url.searchParams.set('sortOrder', options?.sortOrder ?? 'desc');
+
+    setPlatformLogsRecordParams(url, options ?? {});
+
+    const response = await this.fetchApi.fetch(url.toString(), {
+      headers: { ...DIRECT_HEADER },
+    });
+
+    if (!response.ok) {
+      const error = await this.parseError(response);
+      if (response.status === 403) {
+        throw new Error(
+          'You do not have permission to view platform logs. This requires a cluster-scoped role.',
+        );
+      }
+      if (response.status === 501) {
+        throw new Error(
+          'The logs module behind this observability plane does not support platform logs yet.',
+        );
+      }
+      throw new Error(
+        error ||
+          `Failed to fetch platform logs: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return await response.json();
+  }
+
+  async getPlatformLogFilterValues(
+    observerUrl: string,
+    options: PlatformLogFilterValuesQueryOptions,
+  ): Promise<PlatformLogFilterValuesResponse | null> {
+    const url = new URL(
+      `${observerUrl}/api/v1alpha1/platform-logs/filter-values`,
+    );
+
+    url.searchParams.set('filter', options.filter);
+    url.searchParams.set(
+      'startTime',
+      options.startTime ?? new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    );
+    url.searchParams.set(
+      'endTime',
+      options.endTime ?? new Date().toISOString(),
+    );
+
+    // The record query goes over the wire whole, the named filter's own selections
+    // included: the observer ignores those, and sending a query with them stripped
+    // would leave it unable to tell "not selected" from "excluded for this call".
+    setPlatformLogsRecordParams(url, options);
+
+    if (options.valueSearch) {
+      url.searchParams.set('valueSearch', options.valueSearch);
+    }
+    if (options.maxValues) {
+      url.searchParams.set('maxValues', String(options.maxValues));
+    }
+
+    const response = await this.fetchApi.fetch(url.toString(), {
+      headers: { ...DIRECT_HEADER },
+    });
+
+    if (!response.ok) {
+      // Answered rather than thrown: an observer that predates the endpoint (404) and
+      // a logs adapter that cannot aggregate (501) are both "this plane cannot answer",
+      // which the caller handles by falling back to the values it derived itself.
+      // Throwing would also earn a retry, and neither status improves on a second ask.
+      //
+      // Deliberately unlike getPlatformLogs, which throws on 501: there, no logs at all
+      // is the whole answer and has to be said out loud. Here the page still works.
+      if (response.status === 404 || response.status === 501) {
+        return null;
+      }
+      const error = await this.parseError(response);
+      if (response.status === 403) {
+        throw new Error(
+          'You do not have permission to view platform logs. This requires a cluster-scoped role.',
+        );
+      }
+      throw new Error(
+        error ||
+          `Failed to fetch platform log filter values: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return await response.json();
+  }
+
   async getRuntimeEvents(
     namespaceName: string,
     projectName: string,
     environmentName: string,
     componentName?: string,
     options?: {
+      /** Restricts the result to this release line of the component. */
+      releaseLine?: string;
       limit?: number;
       startTime?: string;
       endTime?: string;
@@ -867,6 +1165,7 @@ export class ObservabilityClient implements ObservabilityApi {
             project: projectName,
             ...(componentName ? { component: componentName } : {}),
             environment: environmentName,
+            ...releaseLineScope(componentName, options?.releaseLine),
           },
         }),
       },
@@ -1032,12 +1331,94 @@ export class ObservabilityClient implements ObservabilityApi {
     return data;
   }
 
+  async getDoraMetrics(
+    scope: DoraSearchScope,
+    options: {
+      startTime: string;
+      endTime: string;
+      granularity?: DoraGranularity;
+      metrics?: DoraMetricName[];
+    },
+  ): Promise<DoraMetricsResponse> {
+    // Environment-specific slices resolve through that environment; wider scopes
+    // resolve at namespace level (empty environment).
+    const { observerUrl } = await this.urlCache.resolveUrls(
+      scope.namespace,
+      scope.environment ?? '',
+    );
+
+    const response = await this.fetchApi.fetch(
+      `${observerUrl}/api/v1alpha1/delivery-insights/dora/query`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...DIRECT_HEADER },
+        body: JSON.stringify({
+          searchScope: withReleaseLineScope(scope),
+          startTime: options.startTime,
+          endTime: options.endTime,
+          granularity: options.granularity ?? 'daily',
+          ...(options.metrics?.length ? { metrics: options.metrics } : {}),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await this.parseError(response);
+      throw new Error(
+        error || `Failed to fetch DORA metrics: ${response.statusText}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  async getDoraDeployments(
+    scope: DoraSearchScope,
+    options: {
+      startTime: string;
+      endTime: string;
+      limit?: number;
+      sortOrder?: 'asc' | 'desc';
+    },
+  ): Promise<DoraDeploymentsResponse> {
+    const { observerUrl } = await this.urlCache.resolveUrls(
+      scope.namespace,
+      scope.environment ?? '',
+    );
+
+    const response = await this.fetchApi.fetch(
+      `${observerUrl}/api/v1alpha1/delivery-insights/dora/deployments/query`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...DIRECT_HEADER },
+        body: JSON.stringify({
+          searchScope: withReleaseLineScope(scope),
+          startTime: options.startTime,
+          endTime: options.endTime,
+          limit: options.limit ?? 100,
+          sortOrder: options.sortOrder ?? 'desc',
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await this.parseError(response);
+      throw new Error(
+        error || `Failed to fetch deployments: ${response.statusText}`,
+      );
+    }
+
+    return response.json();
+  }
+
   async getCosts(
     namespaceName: string,
     environmentName: string,
     options?: {
       project?: string;
       component?: string;
+      /** Restricts the result to this release line; requires `component`. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
       granularity?: string;
@@ -1056,6 +1437,14 @@ export class ObservabilityClient implements ObservabilityApi {
     if (options?.project) url.searchParams.set('project', options.project);
     if (options?.component)
       url.searchParams.set('component', options.component);
+    const lineParams = releaseLineScope(
+      options?.component,
+      options?.releaseLine,
+    );
+    if (lineParams.releaseLine)
+      url.searchParams.set('releaseLine', lineParams.releaseLine);
+    if (lineParams.allReleaseLines)
+      url.searchParams.set('allReleaseLines', 'true');
     if (options?.startTime)
       url.searchParams.set('startTime', options.startTime);
     if (options?.endTime) url.searchParams.set('endTime', options.endTime);
@@ -1067,6 +1456,9 @@ export class ObservabilityClient implements ObservabilityApi {
     });
 
     if (!response.ok) {
+      if (response.status === 501 && url.searchParams.has('releaseLine')) {
+        throw new CostsReleaseLineNotSupportedError();
+      }
       const error = await this.parseError(response);
       if (error.includes('Observability is not configured for component')) {
         throw new Error('Observability is not enabled for this component');
@@ -1091,6 +1483,8 @@ export class ObservabilityClient implements ObservabilityApi {
     options?: {
       project?: string;
       component?: string;
+      /** Restricts the result to this release line; requires `component`. */
+      releaseLine?: string;
       startTime?: string;
       endTime?: string;
     },
@@ -1108,6 +1502,14 @@ export class ObservabilityClient implements ObservabilityApi {
     if (options?.project) url.searchParams.set('project', options.project);
     if (options?.component)
       url.searchParams.set('component', options.component);
+    const lineParams = releaseLineScope(
+      options?.component,
+      options?.releaseLine,
+    );
+    if (lineParams.releaseLine)
+      url.searchParams.set('releaseLine', lineParams.releaseLine);
+    if (lineParams.allReleaseLines)
+      url.searchParams.set('allReleaseLines', 'true');
     if (options?.startTime)
       url.searchParams.set('startTime', options.startTime);
     if (options?.endTime) url.searchParams.set('endTime', options.endTime);
@@ -1117,6 +1519,9 @@ export class ObservabilityClient implements ObservabilityApi {
     });
 
     if (!response.ok) {
+      if (response.status === 501 && url.searchParams.has('releaseLine')) {
+        throw new CostsReleaseLineNotSupportedError();
+      }
       const error = await this.parseError(response);
       if (error.includes('Observability is not configured for component')) {
         throw new Error('Observability is not enabled for this component');
@@ -1139,6 +1544,92 @@ export class ObservabilityClient implements ObservabilityApi {
         recommendation: normalizeProfile(item.recommendation),
       })),
     };
+  }
+
+  async queryAuditLogs(
+    request: AuditLogsQueryRequest,
+  ): Promise<AuditLogsResponse> {
+    const { observerUrl } = await this.urlCache.resolvePlatformUrls();
+
+    const response = await this.fetchApi.fetch(
+      `${observerUrl}/api/v1alpha1/audit-logs/query`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...DIRECT_HEADER },
+        body: JSON.stringify(request),
+      },
+    );
+
+    if (!response.ok) {
+      throw await this.parseAuditError(
+        response,
+        'Failed to query the audit trail',
+      );
+    }
+
+    return response.json();
+  }
+
+  async queryAuditLogFilterValues(
+    request: AuditLogFilterValuesRequest,
+  ): Promise<AuditLogFilterValuesResponse> {
+    const { observerUrl } = await this.urlCache.resolvePlatformUrls();
+
+    const response = await this.fetchApi.fetch(
+      `${observerUrl}/api/v1alpha1/audit-logs/filter-values`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...DIRECT_HEADER },
+        body: JSON.stringify(request),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await this.parseAuditError(
+        response,
+        'Failed to list audit log filter values',
+      );
+      // An adapter can serve the records and aggregate nothing, so this 501
+      // means "no pick list for this filter" rather than "no audit trail".
+      if (error instanceof AuditLogsNotSupportedError) {
+        throw new AuditFilterValuesNotSupportedError(error.message);
+      }
+      throw error;
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Turns an audit error response into the specific error the UI can act on.
+   * `parseError` flattens to a string, which loses the status separating "there
+   * is no trail here" from "you may not read it".
+   */
+  private async parseAuditError(
+    response: Response,
+    fallback: string,
+  ): Promise<Error> {
+    let body: { errorCode?: string; message?: string; error?: string } = {};
+    try {
+      const parsed = await response.json();
+      // A body of JSON `null` parses without throwing, and reading through it
+      // would lose the status the caller acts on.
+      if (parsed && typeof parsed === 'object') body = parsed;
+    } catch {
+      // A non-JSON body (a gateway error page) leaves the status to speak.
+    }
+    const message =
+      body.message ||
+      body.error ||
+      `${fallback}: ${response.status} ${response.statusText}`;
+
+    if (response.status === 501) {
+      return new AuditLogsNotSupportedError(message);
+    }
+    if (response.status === 403) {
+      return new AuditLogsForbiddenError(message);
+    }
+    return new Error(message);
   }
 
   private async parseError(response: Response): Promise<string> {

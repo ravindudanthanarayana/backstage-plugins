@@ -1,8 +1,8 @@
 {
   "name": "@openchoreo/backstage-plugin-common",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
   "license": "Apache-2.0",
-  "description": "Common package for shared types and constants",
+  "description": "Shared types, constants, and utilities used across the OpenChoreo Backstage plugins.",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "repository": {
@@ -13,8 +13,7 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.cjs.js",
-    "types": "dist/index.d.ts",
-    "registry": "https://npm.pkg.github.com"
+    "types": "dist/index.d.ts"
   },
   "backstage": {
     "role": "common-library"

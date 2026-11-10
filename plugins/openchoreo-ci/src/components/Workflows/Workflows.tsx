@@ -1,9 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import {
-  useApi,
-  discoveryApiRef,
-  fetchApiRef,
-} from '@backstage/core-plugin-api';
+import { useApi, discoveryApiRef } from '@backstage/core-plugin-api';
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import { ResponseErrorPanel, EmptyState } from '@backstage/core-components';
 import { Typography, Button, Box, CircularProgress } from '@material-ui/core';
 import PlayArrowIcon from '@material-ui/icons/PlayArrow';
@@ -26,6 +23,7 @@ import {
   useWorkflowData,
   useWorkflowRouting,
   useWorkflowRetention,
+  useReleaseLineWorkflowParameters,
 } from '../../hooks';
 import type { ModelsBuild } from '@openchoreo/backstage-plugin-common';
 import {
@@ -38,6 +36,9 @@ import {
   useBuildPermission,
   useOpenChoreoMutation,
   ForbiddenState,
+  BuildFailureNotifierSlot,
+  useReleaseLine,
+  triggerReleaseLineBuild,
 } from '@openchoreo/backstage-plugin-react';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { openChoreoCiClientApiRef } from '../../api/OpenChoreoCiClientApi';
@@ -67,7 +68,7 @@ function unwrapParametersSchema(schema: any): any {
 export const Workflows = () => {
   const classes = useStyles();
   const discoveryApi = useApi(discoveryApiRef);
-  const fetchApi = useApi(fetchApiRef);
+  const fetchApi = useApi(openChoreoFetchApiRef);
   const { entity } = useEntity();
   const client = useApi(openChoreoCiClientApiRef);
   const { getEntityDetails } = useComponentEntityDetails();
@@ -90,6 +91,11 @@ export const Workflows = () => {
 
   // Data fetching hook
   const workflowData = useWorkflowData();
+  const componentWorkflow = workflowData.componentDetails?.componentWorkflow;
+  const effectiveWorkflowParameters = useReleaseLineWorkflowParameters(
+    componentWorkflow?.parameters,
+  );
+  const { releaseLine } = useReleaseLine();
 
   // Check if component has workflow from componentDetails
   const hasWorkflow = !!workflowData.componentDetails?.componentWorkflow;
@@ -199,6 +205,17 @@ export const Workflows = () => {
         throw new Error('No workflow configured for this component');
       }
 
+      // A release line build goes through the component's workflow-run API,
+      // which applies the line's workflow parameter overrides.
+      if (releaseLine) {
+        await triggerReleaseLineBuild(discoveryApi, fetchApi, {
+          componentName,
+          namespaceName,
+          releaseLine,
+        });
+        return;
+      }
+
       const parameters = workflow.parameters
         ? JSON.parse(JSON.stringify(workflow.parameters))
         : {};
@@ -228,7 +245,7 @@ export const Workflows = () => {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-    }, [discoveryApi, fetchApi, getEntityDetails, workflowData]),
+    }, [discoveryApi, fetchApi, getEntityDetails, workflowData, releaseLine]),
     { onSuccess: () => workflowData.fetchBuilds() },
   );
 
@@ -264,6 +281,9 @@ export const Workflows = () => {
               labels: {
                 [CHOREO_LABELS.WORKFLOW_PROJECT]: projectName,
                 [CHOREO_LABELS.WORKFLOW_COMPONENT]: componentName,
+                ...(releaseLine
+                  ? { [CHOREO_LABELS.WORKFLOW_RELEASE_LINE]: releaseLine }
+                  : {}),
               },
             }),
           },
@@ -273,7 +293,7 @@ export const Workflows = () => {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
       },
-      [discoveryApi, fetchApi, getEntityDetails, workflowData],
+      [discoveryApi, fetchApi, getEntityDetails, workflowData, releaseLine],
     ),
     { onSuccess: () => workflowData.fetchBuilds() },
   );
@@ -376,7 +396,12 @@ export const Workflows = () => {
       case 'configurations':
         return (
           <OverviewTab
-            workflow={workflowData.componentDetails?.componentWorkflow}
+            workflow={
+              componentWorkflow && {
+                ...componentWorkflow,
+                parameters: effectiveWorkflowParameters,
+              }
+            }
           />
         );
       default:
@@ -457,13 +482,18 @@ export const Workflows = () => {
     }
 
     return (
-      <WorkflowRunDetailsPage
-        run={selectedRun}
-        onBack={handleBack}
-        initialTab={routingState.runDetailsTab}
-        onTabChange={tab => setRunDetailsTab(tab)}
-        gitFieldMapping={gitFieldMapping}
-      />
+      <>
+        {/* Assistant prompt for a failed run — the URL-run targeting in the
+            notifier needs it mounted on /run/<name> pages too. */}
+        <BuildFailureNotifierSlot />
+        <WorkflowRunDetailsPage
+          run={selectedRun}
+          onBack={handleBack}
+          initialTab={routingState.runDetailsTab}
+          onTabChange={tab => setRunDetailsTab(tab)}
+          gitFieldMapping={gitFieldMapping}
+        />
+      </>
     );
   }
 
@@ -477,6 +507,7 @@ export const Workflows = () => {
 
   return (
     <Box className={classes.container}>
+      <BuildFailureNotifierSlot />
       <Box className={classes.header}>
         <Typography variant="h5" className={classes.headerTitle}>
           Workflows

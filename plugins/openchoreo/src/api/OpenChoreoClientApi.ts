@@ -8,6 +8,9 @@ import type {
   ResourceReleaseBindingRevision,
   RollbackResponse,
   DeleteBindingRevisionResponse,
+  ReleaseLineSummary,
+  ReleaseLineOverrides,
+  ReleaseLineResource,
 } from '@openchoreo/backstage-plugin-common';
 import type { Environment } from '../components/RuntimeLogs/types';
 
@@ -28,7 +31,9 @@ export type TargetPlaneKind =
   | 'WorkflowPlane'
   | 'ClusterWorkflowPlane'
   | 'DataPlane'
-  | 'ClusterDataPlane';
+  | 'ClusterDataPlane'
+  | 'ObservabilityPlane'
+  | 'ClusterObservabilityPlane';
 
 /** Reference to the plane that hosts the secret data */
 export interface TargetPlaneRef {
@@ -107,6 +112,8 @@ export interface ReleaseBinding {
   status?: string;
   statusReason?: string;
   statusMessage?: string;
+  /** The binding's release line, absent for the main line */
+  releaseLine?: string;
 }
 
 /** Release bindings response */
@@ -660,29 +667,28 @@ export interface OpenChoreoClientApi {
   // === Environment Operations ===
 
   /** Fetch environment deployment info for an entity */
-  fetchEnvironmentInfo(entity: Entity): Promise<any>;
-
-  /** Promote a deployment from one environment to another */
-  promoteToEnvironment(
-    entity: Entity,
-    sourceEnvironment: string,
-    targetEnvironment: string,
-  ): Promise<any>;
+  fetchEnvironmentInfo(entity: Entity, releaseLine?: string): Promise<any>;
 
   /** Delete a release binding (undeploy from environment) */
-  deleteReleaseBinding(entity: Entity, environment: string): Promise<any>;
+  deleteReleaseBinding(
+    entity: Entity,
+    environment: string,
+    releaseLine?: string,
+  ): Promise<any>;
 
   /** Update component binding state (Active/Suspend/Undeploy) */
   updateComponentBinding(
     entity: Entity,
     bindingName: string,
     releaseState: 'Active' | 'Suspend' | 'Undeploy',
+    releaseLine?: string,
   ): Promise<any>;
 
   /** Trigger a rolling restart of the binding's workloads via the openchoreo.dev/restartedAt annotation */
   rolloutRestartReleaseBinding(
     entity: Entity,
     bindingName: string,
+    releaseLine?: string,
   ): Promise<any>;
 
   /** Patch component settings (e.g., autoDeploy) */
@@ -692,6 +698,7 @@ export interface OpenChoreoClientApi {
   createComponentRelease(
     entity: Entity,
     releaseName?: string,
+    releaseLine?: string,
   ): Promise<CreateReleaseResponse>;
 
   /** Deploy a release to its target environment */
@@ -710,7 +717,18 @@ export interface OpenChoreoClientApi {
   ): Promise<SchemaResponse>;
 
   /** Fetch all release bindings for a component */
-  fetchReleaseBindings(entity: Entity): Promise<ReleaseBindingsResponse>;
+  /** Fetch the release lines of a component, empty for components without them */
+  fetchReleaseLines(entity: Entity): Promise<ReleaseLineSummary[]>;
+
+  /**
+   * Fetch the release bindings of a release line, the main line when none
+   * is given, or of every line with `allReleaseLines`.
+   */
+  fetchReleaseBindings(
+    entity: Entity,
+    releaseLine?: string,
+    options?: { allReleaseLines?: boolean },
+  ): Promise<ReleaseBindingsResponse>;
 
   /**
    * Fetch a single ResourceRelease CR by name. Used by the Deploy tab's
@@ -809,7 +827,10 @@ export interface OpenChoreoClientApi {
   ): Promise<{ success: boolean; data?: Record<string, unknown> }>;
 
   /** List all component releases for a component (sorted newest first by caller) */
-  listComponentReleases(entity: Entity): Promise<ComponentReleasesResponse>;
+  listComponentReleases(
+    entity: Entity,
+    releaseLine?: string,
+  ): Promise<ComponentReleasesResponse>;
 
   /**
    * List the revisions of the component's release binding in one
@@ -887,6 +908,7 @@ export interface OpenChoreoClientApi {
     componentTypeEnvironmentConfigs?: unknown,
     traitEnvironmentConfigs?: unknown,
     workloadOverrides?: any,
+    releaseLine?: string,
   ): Promise<any>;
 
   /** Patch release binding overrides */
@@ -897,6 +919,7 @@ export interface OpenChoreoClientApi {
     traitEnvironmentConfigs?: unknown,
     workloadOverrides?: any,
     releaseName?: string,
+    releaseLine?: string,
   ): Promise<any>;
 
   /** Fetch resource tree for a specific release binding */
@@ -930,13 +953,17 @@ export interface OpenChoreoClientApi {
   // === Workload Operations ===
 
   /** Fetch full workload K8s resource for an entity */
-  fetchWorkloadInfo(entity: Entity): Promise<WorkloadResource>;
+  fetchWorkloadInfo(
+    entity: Entity,
+    releaseLine?: string,
+  ): Promise<WorkloadResource>;
 
   /** Apply full workload resource (create or update) */
   applyWorkload(
     entity: Entity,
     workload: WorkloadResource,
     isNew: boolean,
+    releaseLine?: string,
   ): Promise<WorkloadResource>;
 
   // === Workflow Operations ===
@@ -996,6 +1023,9 @@ export interface OpenChoreoClientApi {
     },
   ): Promise<any>;
 
+  /** Fetch namespace-level (organization) cell diagram info — all cells in a namespace */
+  getNamespaceCellDiagramInfo(namespaceName: string): Promise<any>;
+
   /** Fetch total bindings count for dashboard */
   fetchTotalBindingsCount(components: ComponentInfo[]): Promise<number>;
 
@@ -1030,6 +1060,37 @@ export interface OpenChoreoClientApi {
     entity: Entity,
     traits: ComponentTrait[],
   ): Promise<ComponentTrait[]>;
+
+  /** Fetch one release line of the entity's component */
+  fetchReleaseLine(
+    entity: Entity,
+    releaseLineName: string,
+  ): Promise<ReleaseLineResource>;
+
+  /** Create a release line of the entity's component */
+  createReleaseLine(
+    entity: Entity,
+    releaseLineName: string,
+    overrides?: ReleaseLineOverrides,
+    /** Stored as the `openchoreo.dev/description` annotation, as for components */
+    description?: string,
+  ): Promise<ReleaseLineResource>;
+
+  /** Replace the overrides of a release line */
+  updateReleaseLine(
+    entity: Entity,
+    releaseLineName: string,
+    overrides: ReleaseLineOverrides,
+  ): Promise<ReleaseLineResource>;
+
+  /** Replace a release line with an edited one, annotations included */
+  replaceReleaseLine(
+    entity: Entity,
+    releaseLine: ReleaseLineResource,
+  ): Promise<ReleaseLineResource>;
+
+  /** Delete a release line, undeploying it from every environment */
+  deleteReleaseLine(entity: Entity, releaseLineName: string): Promise<void>;
 
   /** Fetch the input parameter schema for a component type */
   fetchComponentTypeSchema(
@@ -1337,6 +1398,7 @@ export interface OpenChoreoClientApi {
     environment: string;
     podName?: string;
     containerName?: string;
+    releaseLine?: string;
   }): Promise<{ sessionId: string; ttlSeconds: number }>;
 
   /** List all bindings for a namespace role */

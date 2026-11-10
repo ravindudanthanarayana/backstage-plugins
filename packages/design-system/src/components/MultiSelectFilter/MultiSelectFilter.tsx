@@ -18,6 +18,11 @@ export interface MultiSelectOption {
   label: string;
   /** Optional count shown right-aligned in the menu item. */
   count?: number;
+  /**
+   * Fixed: shown, checked, and not toggleable — for a value the view cannot
+   * function without. Clear and Select all leave it alone.
+   */
+  disabled?: boolean;
 }
 
 /** A group of options. Provide a `label` to render a heading; omit for a flat list. */
@@ -34,19 +39,37 @@ export interface MultiSelectFilterProps {
   allValues: string[];
   selected: Set<string>;
   onChange: (selected: Set<string>) => void;
+  emptyLabel?: string;
+  /**
+   * Summarise the selection on the trigger. Turn it off where the menu is the
+   * only place the selection matters, so the trigger keeps a stable width.
+   */
+  showSelection?: boolean;
+  disabled?: boolean;
+  /** Per-row "Only" action: Lets the user select a single item from a list with multiple selected. */
+  showOnlyAction?: boolean;
+  /** Show a lone option's name on the trigger instead of "All". */
+  nameSoleOption?: boolean;
+  hideClear?: boolean;
+  disabledHint?: string;
 }
 
 /**
- * Builds the trigger value: "All" / "None" / the single selected value /
- * "<first value> +N" for a multi-selection. `selectedOptions` must be in menu
+ * Builds the trigger value: "All" / the empty label / the single selected value
+ * / "<first value> +N" for a multi-selection. `selectedOptions` must be in menu
  * order so the shown value is stable.
  */
 function triggerValue(
   selectedOptions: MultiSelectOption[],
   total: number,
+  emptyLabel: string,
+  nameSoleOption: boolean,
 ): string {
+  // When a list has only one item, the trigger shows that item rather than "All"
+  if (nameSoleOption && total === 1 && selectedOptions.length === 1)
+    return selectedOptions[0].label;
   if (total === 0 || selectedOptions.length === total) return 'All';
-  if (selectedOptions.length === 0) return 'None';
+  if (selectedOptions.length === 0) return emptyLabel;
   const [first, ...rest] = selectedOptions;
   return rest.length === 0 ? first.label : `${first.label} +${rest.length}`;
 }
@@ -63,6 +86,13 @@ export const MultiSelectFilter = ({
   allValues,
   selected,
   onChange,
+  emptyLabel = 'None',
+  showSelection = true,
+  disabled = false,
+  hideClear = false,
+  showOnlyAction = false,
+  nameSoleOption = false,
+  disabledHint,
 }: MultiSelectFilterProps) => {
   const classes = useStyles();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -70,7 +100,6 @@ export const MultiSelectFilter = ({
 
   const allSelected =
     allValues.length > 0 && selected.size === allValues.length;
-  const noneSelected = selected.size === 0;
   const isFiltering = allValues.length > 0 && !allSelected;
 
   // Selected options in menu order, for a stable trigger label + tooltip.
@@ -78,12 +107,22 @@ export const MultiSelectFilter = ({
   const selectedOptions = orderedOptions.filter(option =>
     selected.has(option.value),
   );
-  const tooltipTitle =
-    isFiltering && selectedOptions.length > 0
-      ? selectedOptions.map(option => option.label).join(', ')
-      : '';
+  let tooltipTitle = '';
+  if (disabled && disabledHint) tooltipTitle = disabledHint;
+  else if (isFiltering && selectedOptions.length > 0) {
+    tooltipTitle = selectedOptions.map(option => option.label).join(', ');
+  }
+
+  // Values the caller has fixed: they survive Clear, because a view that needs
+  // them would otherwise be left unusable by one click.
+  const fixedValues = orderedOptions
+    .filter(option => option.disabled)
+    .map(option => option.value);
 
   const toggle = (value: string) => {
+    // Guarded here rather than only on the menu item: MUI disables that with
+    // `pointer-events`, which is styling, not a rule.
+    if (fixedValues.includes(value)) return;
     const next = new Set(selected);
     if (next.has(value)) {
       next.delete(value);
@@ -96,8 +135,11 @@ export const MultiSelectFilter = ({
   return (
     <>
       <Tooltip title={tooltipTitle}>
-        {/* span wrapper keeps the tooltip working even when the button is disabled */}
-        <span>
+        {/* span wrapper keeps the tooltip working even when the button is
+            disabled, and takes the focus the disabled button cannot, so a hint
+            is reachable without a pointer. */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+        <span tabIndex={disabled && disabledHint ? 0 : undefined}>
           <Button
             variant="outlined"
             size="small"
@@ -111,10 +153,17 @@ export const MultiSelectFilter = ({
             aria-label={`Filter by ${label.toLowerCase()}`}
             aria-haspopup="menu"
             aria-expanded={open}
-            disabled={allValues.length === 0}
+            disabled={disabled || allValues.length === 0}
           >
             <span className={classes.buttonLabel}>
-              {label}: {triggerValue(selectedOptions, allValues.length)}
+              {showSelection
+                ? `${label}: ${triggerValue(
+                    selectedOptions,
+                    allValues.length,
+                    emptyLabel,
+                    nameSoleOption,
+                  )}`
+                : label}
             </span>
           </Button>
         </span>
@@ -138,14 +187,18 @@ export const MultiSelectFilter = ({
           >
             Select all
           </Button>
-          <Button
-            color="primary"
-            className={classes.menuActionButton}
-            disabled={noneSelected}
-            onClick={() => onChange(new Set())}
-          >
-            Clear
-          </Button>
+          {!hideClear && (
+            <Button
+              color="primary"
+              className={classes.menuActionButton}
+              disabled={[...selected].every(value =>
+                fixedValues.includes(value),
+              )}
+              onClick={() => onChange(new Set(fixedValues))}
+            >
+              Clear
+            </Button>
+          )}
         </Box>
         {groups.flatMap((group, groupIndex) => [
           ...(group.label
@@ -163,6 +216,7 @@ export const MultiSelectFilter = ({
             <MenuItem
               key={`group-${groupIndex}-${option.value}`}
               dense
+              disabled={option.disabled}
               className={classes.menuItem}
               onClick={() => toggle(option.value)}
             >
@@ -172,6 +226,7 @@ export const MultiSelectFilter = ({
                 color="primary"
                 className={classes.checkbox}
                 checked={selected.has(option.value)}
+                disabled={option.disabled}
                 tabIndex={-1}
                 disableRipple
                 inputProps={{ 'aria-label': option.label }}
@@ -179,6 +234,19 @@ export const MultiSelectFilter = ({
               <Typography variant="body2" style={{ flexGrow: 1 }}>
                 {option.label}
               </Typography>
+              {showOnlyAction && !option.disabled && (
+                <Button
+                  color="primary"
+                  className={classes.onlyAction}
+                  aria-label={`Only ${option.label}`}
+                  onClick={event => {
+                    event.stopPropagation();
+                    onChange(new Set([option.value]));
+                  }}
+                >
+                  Only
+                </Button>
+              )}
               {option.count !== undefined && (
                 <Typography variant="body2" color="textSecondary">
                   {option.count}

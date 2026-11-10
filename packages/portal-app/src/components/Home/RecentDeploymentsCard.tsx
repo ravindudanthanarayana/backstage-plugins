@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import useAsync from 'react-use/esm/useAsync';
 import { useApi } from '@backstage/core-plugin-api';
-import { InfoCard } from '@backstage/core-components';
 import { Entity, stringifyEntityRef } from '@backstage/catalog-model';
 import { catalogApiRef, EntityRefLink } from '@backstage/plugin-catalog-react';
 import { CHOREO_ANNOTATIONS } from '@openchoreo/backstage-plugin-common';
@@ -50,7 +49,10 @@ interface EnvDeployment {
   lastDeployed: number;
 }
 
-/** One row per component; all deployed environments collapse into it. */
+/**
+ * One row per component or release line; all deployed environments collapse
+ * into it.
+ */
 interface DeploymentRow {
   entityRef: string;
   /** Component type (entity spec.type), e.g. 'service', 'api-proxy'. */
@@ -214,13 +216,10 @@ const DeploymentItemSkeleton = () => {
   );
 };
 
-/**
- * Home page card listing the most recent deployments across the user's
- * components — "what just shipped". Built from the catalog Component list
- * plus per-component environment info; the fan-out is capped at
- * MAX_COMPONENTS to keep the landing page cheap.
- */
-export const RecentDeploymentsCard = () => {
+// Body-only content for the "Recent Deployments" home widget. Built from the
+// catalog Component list + per-component environment info, capped at
+// MAX_COMPONENTS. The card and title come from the widget's card extension.
+export const RecentDeploymentsContent = () => {
   const catalogApi = useApi(catalogApiRef);
   const client = useApi(openChoreoClientApiRef);
   const [collapsed, setCollapsed] = useState(true);
@@ -234,8 +233,10 @@ export const RecentDeploymentsCard = () => {
     // no "last deployed" field, so created-at is the best server-side proxy
     // for which components are worth the environment-info fan-out; true
     // recency ordering would need a backend endpoint listing recent releases.
+    // Release lines are fetched too, since a component's environment info
+    // covers only its main line.
     const { items: components } = await catalogApi.queryEntities({
-      filter: { kind: 'Component' },
+      filter: { kind: ['Component', 'ReleaseLine'] },
       limit: MAX_COMPONENTS,
       orderFields: [
         {
@@ -255,8 +256,14 @@ export const RecentDeploymentsCard = () => {
 
     const results = await Promise.allSettled(
       components.map(async (entity): Promise<DeploymentRow | null> => {
+        const releaseLine =
+          entity.kind === 'ReleaseLine'
+            ? entity.metadata.annotations?.[CHOREO_ANNOTATIONS.RELEASE_LINE] ??
+              entity.metadata.name
+            : undefined;
         const environments = (await client.fetchEnvironmentInfo(
           entity as Entity,
+          releaseLine,
         )) as EnvironmentInfo[];
 
         const envDeployments = (environments ?? [])
@@ -279,7 +286,9 @@ export const RecentDeploymentsCard = () => {
           typeof entity.spec?.type === 'string' ? entity.spec.type : undefined;
         return {
           entityRef: stringifyEntityRef(entity),
-          componentType: rawType?.split('/').pop() || undefined,
+          componentType: releaseLine
+            ? 'release line'
+            : rawType?.split('/').pop() || undefined,
           environments: envDeployments,
           latestDeployed: envDeployments[0].lastDeployed,
         };
@@ -334,20 +343,17 @@ export const RecentDeploymentsCard = () => {
   }
 
   return (
-    <InfoCard
-      title="Recent Deployments"
-      subheader="Latest releases across your components"
-      actions={
-        showToggle ? (
-          <Button variant="text" onClick={() => setCollapsed(prev => !prev)}>
-            {collapsed ? 'View more' : 'View less'}
-          </Button>
-        ) : undefined
-      }
-    >
+    <>
       <List dense disablePadding>
         {body}
       </List>
-    </InfoCard>
+      {showToggle && (
+        <Box display="flex" justifyContent="flex-end">
+          <Button variant="text" onClick={() => setCollapsed(prev => !prev)}>
+            {collapsed ? 'View more' : 'View less'}
+          </Button>
+        </Box>
+      )}
+    </>
   );
 };

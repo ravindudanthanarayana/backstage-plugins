@@ -18,7 +18,8 @@ import {
   ForbiddenState,
   useProjectEnvironments,
 } from '@openchoreo/backstage-plugin-react';
-import { EnvironmentsStatusNotice } from '../common';
+import { EnvironmentsStatusNotice, ReleaseLineFilter } from '../common';
+import { componentDefaultReleaseLine } from '../../hooks/useSelectedReleaseLine';
 import { RefreshOverlay } from '@openchoreo/backstage-design-system';
 import { useRuntimeEventsStyles } from './styles';
 
@@ -209,6 +210,15 @@ const ObservabilityRuntimeEventsContent = () => {
         environments={environments}
         environmentsLoading={environmentsLoading}
         disabled={eventsLoading}
+        releaseLineFilter={
+          <ReleaseLineFilter
+            gridItem
+            defaultLine={componentDefaultReleaseLine(entity)}
+            namespace={namespace}
+            component={componentName}
+            disabled={eventsLoading}
+          />
+        }
       />
 
       {eventsError && renderError(eventsError)}

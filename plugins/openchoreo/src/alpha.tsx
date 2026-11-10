@@ -1,33 +1,149 @@
 import {
   ApiBlueprint,
+  configApiRef,
+  createFrontendFeatureLoader,
   createFrontendPlugin,
   discoveryApiRef,
   fetchApiRef,
+  oauthRequestApiRef,
+  PageBlueprint,
   PluginWrapperBlueprint,
+  SubPageBlueprint,
 } from '@backstage/frontend-plugin-api';
+import { OAuth2 } from '@backstage/core-app-api';
+import { Content } from '@backstage/core-components';
 import {
   EntityCardBlueprint,
   EntityContentBlueprint,
+  EntityContentLayoutBlueprint,
+  EntityContextMenuItemBlueprint,
 } from '@backstage/plugin-catalog-react/alpha';
-import { CHOREO_LABELS } from '@openchoreo/backstage-plugin-common';
+import {
+  isOpenChoreoManagedEntity,
+  isOpenChoreoManagedOfKind,
+} from '@openchoreo/backstage-plugin-common';
 import { FeatureGate } from '@openchoreo/backstage-plugin-react';
+import DeleteIcon from '@material-ui/icons/Delete';
+import EditIcon from '@material-ui/icons/Edit';
+import {
+  useDeleteEntityContextMenuItemProps,
+  isDeletableOpenChoreoEntity,
+} from './components/DeleteEntity/hooks/useDeleteEntityContextMenuItemProps';
+import {
+  useAnnotationEditorContextMenuItemProps,
+  isEditableAnnotationsEntity,
+} from './components/AnnotationEditor/useAnnotationEditorContextMenuItemProps';
+
+import { openChoreoEntityGroupsModule } from './extensions/openChoreoEntityGroupsModule';
+import { openChoreoAppModule } from './appModule';
+
+export { openChoreoEntityPageOverride } from './extensions/openChoreoEntityPageOverride';
+export { openChoreoEntityGroupsModule };
+export { openChoreoAppModule };
 
 import {
   rootCatalogEnvironmentRouteRef,
   accessControlRouteRef,
+  secretsRouteRef,
+  execTerminalRouteRef,
   resourceEnvironmentsRouteRef,
 } from './routes';
 import { openChoreoClientApiRef } from './api/OpenChoreoClientApi';
 import { OpenChoreoClient } from './api/OpenChoreoClient';
+import { openChoreoAuthApiRef } from './api/authRefs';
+import { OAuthOpenChoreoTokenApi } from './api/OAuthOpenChoreoTokenApi';
+import {
+  openChoreoFetchApiRef,
+  openChoreoTokenApiRef,
+  OpenChoreoScopedFetchApi,
+} from '@openchoreo/backstage-plugin-react';
 
 const openChoreoClientApi = ApiBlueprint.make({
   name: 'open-choreo-client',
   params: defineParams =>
     defineParams({
       api: openChoreoClientApiRef,
-      deps: { discoveryApi: discoveryApiRef, fetchApi: fetchApiRef },
+      deps: { discoveryApi: discoveryApiRef, fetchApi: openChoreoFetchApiRef },
       factory: ({ discoveryApi, fetchApi }) =>
         new OpenChoreoClient(discoveryApi, fetchApi),
+    }),
+});
+
+// Supplies the OpenChoreo user token to everything that talks to an OpenChoreo
+// backend. Sourcing it from the `openchoreo-auth` OAuth provider is an
+// implementation detail of this factory: a host whose own session already
+// carries an OpenChoreo-accepted token overrides this API alone.
+const openChoreoTokenApi = ApiBlueprint.make({
+  name: 'openchoreo-token',
+  params: defineParams =>
+    defineParams({
+      api: openChoreoTokenApiRef,
+      deps: { oauthApi: openChoreoAuthApiRef },
+      factory: ({ oauthApi }) => new OAuthOpenChoreoTokenApi(oauthApi),
+    }),
+});
+
+// An OpenChoreo-scoped fetch API that decorates the host's own. Registered as
+// a plugin API rather than an override of `core.fetch`, so the host keeps its
+// fetch middleware and the OpenChoreo token reaches OpenChoreo requests only.
+const openChoreoFetchApi = ApiBlueprint.make({
+  name: 'openchoreo-fetch',
+  params: defineParams =>
+    defineParams({
+      api: openChoreoFetchApiRef,
+      deps: {
+        baseFetchApi: fetchApiRef,
+        tokenApi: openChoreoTokenApiRef,
+        configApi: configApiRef,
+      },
+      factory: ({ baseFetchApi, tokenApi, configApi }) =>
+        new OpenChoreoScopedFetchApi({
+          baseFetchApi,
+          tokenApi,
+          authEnabled:
+            configApi.getOptionalBoolean('openchoreo.features.auth.enabled') ??
+            true,
+          backendBaseUrl: configApi.getString('backend.baseUrl'),
+        }),
+    }),
+});
+
+// OAuth2 client for the OpenChoreo IDP. Consumed by `openChoreoTokenApi`
+// above, by the openChoreoAppModule's permission override, and by the portal's
+// SignInPage.
+const openChoreoAuthApi = ApiBlueprint.make({
+  name: 'openchoreo-auth',
+  params: defineParams =>
+    defineParams({
+      api: openChoreoAuthApiRef,
+      deps: {
+        discoveryApi: discoveryApiRef,
+        oauthRequestApi: oauthRequestApiRef,
+        configApi: configApiRef,
+      },
+      factory: ({ discoveryApi, oauthRequestApi, configApi }) => {
+        const env =
+          configApi.getOptionalString('auth.environment') ?? 'development';
+        const scopeStr = configApi.getOptionalString(
+          'openchoreo.features.auth.scope',
+        );
+        const scopes = scopeStr?.split(/\s+/).filter(Boolean) ?? [];
+        const defaultScopes = scopes.length
+          ? scopes
+          : ['openid', 'profile', 'email'];
+        return OAuth2.create({
+          discoveryApi,
+          oauthRequestApi,
+          configApi,
+          provider: {
+            id: 'openchoreo-auth',
+            title: 'OpenChoreo',
+            icon: () => null,
+          },
+          environment: env,
+          defaultScopes,
+        });
+      },
     }),
 });
 
@@ -51,43 +167,17 @@ const queryProvider = PluginWrapperBlueprint.make({
     }),
 });
 
-// ─── Shared filter for any kind that needs the resource-definition tab ──────
-//
-// ResourceDefinitionTab is reused on ~20 entity kinds. Register it once with
-// a callable filter (rather than 20 string-filter blueprints) so it stays
-// a single registration in the alpha export and a single line in the
-// extension array.
-const KINDS_WITH_RESOURCE_DEFINITION = new Set([
-  'component',
-  'system',
-  'domain',
-  'resource',
-  'environment',
-  'dataplane',
-  'clusterdataplane',
-  'workflowplane',
-  'clusterworkflowplane',
-  'observabilityplane',
-  'clusterobservabilityplane',
-  'deploymentpipeline',
-  'componenttype',
-  'resourcetype',
-  'clustercomponenttype',
-  'clusterresourcetype',
-  'traittype',
-  'clustertraittype',
-  'workflow',
-  'clusterworkflow',
-  'componentworkflow',
-]);
-
 const resourceDefinitionEntityContent = EntityContentBlueprint.make({
   name: 'resource-definition',
   params: {
     path: '/definition',
     title: 'Definition',
+    group: 'definition',
+    // API entities are excluded — upstream api-docs owns their /definition tab.
+    // Release lines have their own Definition tab.
     filter: entity =>
-      KINDS_WITH_RESOURCE_DEFINITION.has(entity.kind.toLowerCase()),
+      isOpenChoreoManagedEntity(entity) &&
+      !['api', 'releaseline'].includes(entity.kind.toLowerCase()),
     loader: () =>
       import('./components/ResourceDefinition').then(m => (
         <m.ResourceDefinitionTab />
@@ -96,12 +186,27 @@ const resourceDefinitionEntityContent = EntityContentBlueprint.make({
 });
 
 // ─── Component-page tabs (kind:component) ─────────────────────────────────
+const releaseLineDefinitionEntityContent = EntityContentBlueprint.make({
+  name: 'release-line-definition',
+  params: {
+    path: '/definition',
+    title: 'Definition',
+    group: 'definition',
+    filter: isOpenChoreoManagedOfKind('releaseline'),
+    loader: () =>
+      import('./components/ReleaseLines').then(m => (
+        <m.ReleaseLineDefinitionTab />
+      )),
+  },
+});
+
 const componentDeployEntityContent = EntityContentBlueprint.make({
   name: 'component-deploy',
   params: {
     path: '/environments',
     title: 'Deploy',
-    filter: 'kind:component',
+    group: 'deploy',
+    filter: isOpenChoreoManagedOfKind('component'),
     loader: () =>
       import('./components/Environments/Environments').then(m => (
         <m.Environments />
@@ -113,7 +218,7 @@ const componentDeployEntityContent = EntityContentBlueprint.make({
 const deploymentStatusCard = EntityCardBlueprint.make({
   name: 'deployment-status',
   params: {
-    filter: 'kind:component',
+    filter: isOpenChoreoManagedOfKind('component'),
     loader: () =>
       import('./components/Environments').then(m => <m.DeploymentStatusCard />),
   },
@@ -125,7 +230,7 @@ const deploymentStatusCard = EntityCardBlueprint.make({
 const runtimeHealthCard = EntityCardBlueprint.make({
   name: 'runtime-health',
   params: {
-    filter: 'kind:component',
+    filter: isOpenChoreoManagedOfKind('component'),
     loader: () =>
       import('./components/RuntimeLogs').then(m => (
         <FeatureGate feature="observability">
@@ -136,12 +241,27 @@ const runtimeHealthCard = EntityCardBlueprint.make({
 });
 
 // ─── System (project) page tabs + cards (kind:system) ─────────────────────
+const projectDeployEntityContent = EntityContentBlueprint.make({
+  name: 'project-deploy',
+  params: {
+    path: '/deploy',
+    title: 'Deploy',
+    group: 'deploy',
+    filter: isOpenChoreoManagedOfKind('system'),
+    loader: () =>
+      import('./components/ProjectEnvironments').then(m => (
+        <m.ProjectEnvironments />
+      )),
+  },
+});
+
 const cellDiagramEntityContent = EntityContentBlueprint.make({
   name: 'cell-diagram',
   params: {
     path: '/cell-diagram',
     title: 'Cell Diagram',
-    filter: 'kind:system',
+    group: 'cell-diagram',
+    filter: isOpenChoreoManagedOfKind('system'),
     loader: () =>
       import('./components/CellDiagram/CellDiagram').then(m => (
         <m.CellDiagram />
@@ -149,10 +269,43 @@ const cellDiagramEntityContent = EntityContentBlueprint.make({
   },
 });
 
+const projectDiagramEntityContent = EntityContentBlueprint.make({
+  name: 'project-diagram',
+  params: {
+    path: '/diagram',
+    title: 'Diagram',
+    group: 'diagram',
+    filter: isOpenChoreoManagedOfKind('system'),
+    loader: () =>
+      Promise.all([
+        import('./components/ContainedCatalogGraphCard'),
+        import('@backstage/plugin-catalog-graph'),
+        import('@backstage/catalog-model'),
+      ]).then(([contained, graph, model]) => (
+        <contained.ContainedCatalogGraphCard
+          direction={graph.Direction.TOP_BOTTOM}
+          title="System Diagram"
+          height={700}
+          relations={[
+            model.RELATION_PART_OF,
+            model.RELATION_HAS_PART,
+            model.RELATION_API_CONSUMED_BY,
+            model.RELATION_API_PROVIDED_BY,
+            model.RELATION_CONSUMES_API,
+            model.RELATION_PROVIDES_API,
+            model.RELATION_DEPENDENCY_OF,
+            model.RELATION_DEPENDS_ON,
+          ]}
+          unidirectional={false}
+        />
+      )),
+  },
+});
+
 const projectContentsCard = EntityCardBlueprint.make({
   name: 'project-contents',
   params: {
-    filter: 'kind:system',
+    filter: isOpenChoreoManagedOfKind('system'),
     loader: () =>
       import('./components/Projects/ProjectContentsCard').then(m => (
         <m.ProjectContentsCard />
@@ -163,7 +316,7 @@ const projectContentsCard = EntityCardBlueprint.make({
 const deploymentPipelineCard = EntityCardBlueprint.make({
   name: 'deployment-pipeline',
   params: {
-    filter: 'kind:system',
+    filter: isOpenChoreoManagedOfKind('system'),
     loader: () =>
       import('./components/Projects/OverviewCards').then(m => (
         <m.DeploymentPipelineCard />
@@ -171,11 +324,25 @@ const deploymentPipelineCard = EntityCardBlueprint.make({
   },
 });
 
-// ─── Domain (namespace) page cards (kind:domain) ──────────────────────────
+// ─── Domain (namespace) page tabs + cards (kind:domain) ───────────────────
+const namespaceCellDiagramEntityContent = EntityContentBlueprint.make({
+  name: 'namespace-cell-diagram',
+  params: {
+    path: '/cell-diagram',
+    title: 'Cell Diagram',
+    group: 'cell-diagram',
+    filter: isOpenChoreoManagedOfKind('domain'),
+    loader: () =>
+      import('./components/NamespaceCellDiagram').then(m => (
+        <m.NamespaceCellDiagram />
+      )),
+  },
+});
+
 const namespaceProjectsCard = EntityCardBlueprint.make({
   name: 'namespace-projects',
   params: {
-    filter: 'kind:domain',
+    filter: isOpenChoreoManagedOfKind('domain'),
     loader: () =>
       import('./components/Namespaces').then(m => <m.NamespaceProjectsCard />),
   },
@@ -184,7 +351,7 @@ const namespaceProjectsCard = EntityCardBlueprint.make({
 const namespaceResourcesCard = EntityCardBlueprint.make({
   name: 'namespace-resources',
   params: {
-    filter: 'kind:domain',
+    filter: isOpenChoreoManagedOfKind('domain'),
     loader: () =>
       import('./components/Namespaces').then(m => <m.NamespaceResourcesCard />),
   },
@@ -192,22 +359,17 @@ const namespaceResourcesCard = EntityCardBlueprint.make({
 
 // ─── Resource page (managed) tab + cards ──────────────────────────────────
 //
-// Resources are kind:resource but only "OpenChoreo-managed" resources (a
-// label-based discriminator) get this layout. Use a callable filter that
-// matches on the CHOREO_LABELS.MANAGED label; consumers without the label
-// fall through to upstream's default resource page.
-const isOpenChoreoManagedResource = (
-  entity: import('@backstage/catalog-model').Entity,
-) =>
-  entity.kind.toLowerCase() === 'resource' &&
-  entity.metadata.labels?.[CHOREO_LABELS.MANAGED] === 'true';
+// Resources are kind:resource but only "OpenChoreo-managed" resources
+// (label-discriminated via `isOpenChoreoManagedOfKind`) get this layout;
+// vanilla Resource entities fall through to Backstage defaults.
 
 const resourceDeployEntityContent = EntityContentBlueprint.make({
   name: 'resource-deploy',
   params: {
     path: '/environments',
     title: 'Deploy',
-    filter: isOpenChoreoManagedResource,
+    group: 'deploy',
+    filter: isOpenChoreoManagedOfKind('resource'),
     loader: () =>
       import('./components/ResourceEnvironments').then(m => (
         <m.ResourceEnvironments />
@@ -218,7 +380,7 @@ const resourceDeployEntityContent = EntityContentBlueprint.make({
 const resourceParametersCard = EntityCardBlueprint.make({
   name: 'resource-parameters',
   params: {
-    filter: isOpenChoreoManagedResource,
+    filter: isOpenChoreoManagedOfKind('resource'),
     loader: () =>
       import('./components/ResourceOverview').then(m => (
         <m.ResourceParametersCard />
@@ -229,7 +391,7 @@ const resourceParametersCard = EntityCardBlueprint.make({
 const resourceDeploymentsCard = EntityCardBlueprint.make({
   name: 'resource-deployments',
   params: {
-    filter: isOpenChoreoManagedResource,
+    filter: isOpenChoreoManagedOfKind('resource'),
     loader: () =>
       import('./components/ResourceOverview').then(m => (
         <m.ResourceDeploymentsCard />
@@ -240,7 +402,7 @@ const resourceDeploymentsCard = EntityCardBlueprint.make({
 const consumingComponentsCard = EntityCardBlueprint.make({
   name: 'consuming-components',
   params: {
-    filter: isOpenChoreoManagedResource,
+    filter: isOpenChoreoManagedOfKind('resource'),
     loader: () =>
       import('./components/ResourceOverview').then(m => (
         <m.ConsumingComponentsCard />
@@ -252,7 +414,7 @@ const consumingComponentsCard = EntityCardBlueprint.make({
 const environmentStatusSummaryCard = EntityCardBlueprint.make({
   name: 'environment-status-summary',
   params: {
-    filter: 'kind:environment',
+    filter: isOpenChoreoManagedOfKind('environment'),
     loader: () =>
       import('./components/EnvironmentOverview').then(m => (
         <m.EnvironmentStatusSummaryCard />
@@ -263,7 +425,7 @@ const environmentStatusSummaryCard = EntityCardBlueprint.make({
 const environmentPromotionCard = EntityCardBlueprint.make({
   name: 'environment-promotion',
   params: {
-    filter: 'kind:environment',
+    filter: isOpenChoreoManagedOfKind('environment'),
     loader: () =>
       import('./components/EnvironmentOverview').then(m => (
         <m.EnvironmentPromotionCard />
@@ -274,7 +436,7 @@ const environmentPromotionCard = EntityCardBlueprint.make({
 const environmentDeployedComponentsCard = EntityCardBlueprint.make({
   name: 'environment-deployed-components',
   params: {
-    filter: 'kind:environment',
+    filter: isOpenChoreoManagedOfKind('environment'),
     loader: () =>
       import('./components/EnvironmentOverview').then(m => (
         <m.EnvironmentDeployedComponentsCard />
@@ -285,7 +447,7 @@ const environmentDeployedComponentsCard = EntityCardBlueprint.make({
 const environmentGatewayConfigurationCard = EntityCardBlueprint.make({
   name: 'environment-gateway-configuration',
   params: {
-    filter: 'kind:environment',
+    filter: isOpenChoreoManagedOfKind('environment'),
     loader: () =>
       import('./components/EnvironmentOverview').then(m => (
         <m.EnvironmentGatewayConfigurationCard />
@@ -297,7 +459,7 @@ const environmentGatewayConfigurationCard = EntityCardBlueprint.make({
 const dataplaneStatusCard = EntityCardBlueprint.make({
   name: 'dataplane-status',
   params: {
-    filter: 'kind:dataplane',
+    filter: isOpenChoreoManagedOfKind('dataplane'),
     loader: () =>
       import('./components/DataplaneOverview').then(m => (
         <m.DataplaneStatusCard />
@@ -308,7 +470,7 @@ const dataplaneStatusCard = EntityCardBlueprint.make({
 const dataplaneEnvironmentsCard = EntityCardBlueprint.make({
   name: 'dataplane-environments',
   params: {
-    filter: 'kind:dataplane',
+    filter: isOpenChoreoManagedOfKind('dataplane'),
     loader: () =>
       import('./components/DataplaneOverview').then(m => (
         <m.DataplaneEnvironmentsCard />
@@ -319,7 +481,7 @@ const dataplaneEnvironmentsCard = EntityCardBlueprint.make({
 const dataplaneGatewayConfigurationCard = EntityCardBlueprint.make({
   name: 'dataplane-gateway-configuration',
   params: {
-    filter: 'kind:dataplane',
+    filter: isOpenChoreoManagedOfKind('dataplane'),
     loader: () =>
       import('./components/DataplaneOverview').then(m => (
         <m.DataplaneGatewayConfigurationCard />
@@ -331,7 +493,7 @@ const dataplaneGatewayConfigurationCard = EntityCardBlueprint.make({
 const clusterDataplaneStatusCard = EntityCardBlueprint.make({
   name: 'cluster-dataplane-status',
   params: {
-    filter: 'kind:clusterdataplane',
+    filter: isOpenChoreoManagedOfKind('clusterdataplane'),
     loader: () =>
       import('./components/ClusterDataplaneOverview').then(m => (
         <m.ClusterDataplaneStatusCard />
@@ -342,7 +504,7 @@ const clusterDataplaneStatusCard = EntityCardBlueprint.make({
 const clusterDataplaneEnvironmentsCard = EntityCardBlueprint.make({
   name: 'cluster-dataplane-environments',
   params: {
-    filter: 'kind:clusterdataplane',
+    filter: isOpenChoreoManagedOfKind('clusterdataplane'),
     loader: () =>
       import('./components/ClusterDataplaneOverview').then(m => (
         <m.ClusterDataplaneEnvironmentsCard />
@@ -353,7 +515,7 @@ const clusterDataplaneEnvironmentsCard = EntityCardBlueprint.make({
 const clusterDataplaneGatewayConfigurationCard = EntityCardBlueprint.make({
   name: 'cluster-dataplane-gateway-configuration',
   params: {
-    filter: 'kind:clusterdataplane',
+    filter: isOpenChoreoManagedOfKind('clusterdataplane'),
     loader: () =>
       import('./components/ClusterDataplaneOverview').then(m => (
         <m.ClusterDataplaneGatewayConfigurationCard />
@@ -365,7 +527,7 @@ const clusterDataplaneGatewayConfigurationCard = EntityCardBlueprint.make({
 const workflowPlaneStatusCard = EntityCardBlueprint.make({
   name: 'workflow-plane-status',
   params: {
-    filter: 'kind:workflowplane',
+    filter: isOpenChoreoManagedOfKind('workflowplane'),
     loader: () =>
       import('./components/WorkflowPlaneOverview').then(m => (
         <m.WorkflowPlaneStatusCard />
@@ -376,7 +538,7 @@ const workflowPlaneStatusCard = EntityCardBlueprint.make({
 const clusterWorkflowPlaneStatusCard = EntityCardBlueprint.make({
   name: 'cluster-workflow-plane-status',
   params: {
-    filter: 'kind:clusterworkflowplane',
+    filter: isOpenChoreoManagedOfKind('clusterworkflowplane'),
     loader: () =>
       import('./components/ClusterWorkflowPlaneOverview').then(m => (
         <m.ClusterWorkflowPlaneStatusCard />
@@ -388,7 +550,7 @@ const clusterWorkflowPlaneStatusCard = EntityCardBlueprint.make({
 const observabilityPlaneStatusCard = EntityCardBlueprint.make({
   name: 'observability-plane-status',
   params: {
-    filter: 'kind:observabilityplane',
+    filter: isOpenChoreoManagedOfKind('observabilityplane'),
     loader: () =>
       import('./components/ObservabilityPlaneOverview').then(m => (
         <m.ObservabilityPlaneStatusCard />
@@ -399,7 +561,7 @@ const observabilityPlaneStatusCard = EntityCardBlueprint.make({
 const observabilityPlaneLinkedPlanesCard = EntityCardBlueprint.make({
   name: 'observability-plane-linked-planes',
   params: {
-    filter: 'kind:observabilityplane',
+    filter: isOpenChoreoManagedOfKind('observabilityplane'),
     loader: () =>
       import('./components/ObservabilityPlaneOverview').then(m => (
         <m.ObservabilityPlaneLinkedPlanesCard />
@@ -410,7 +572,7 @@ const observabilityPlaneLinkedPlanesCard = EntityCardBlueprint.make({
 const clusterObservabilityPlaneStatusCard = EntityCardBlueprint.make({
   name: 'cluster-observability-plane-status',
   params: {
-    filter: 'kind:clusterobservabilityplane',
+    filter: isOpenChoreoManagedOfKind('clusterobservabilityplane'),
     loader: () =>
       import('./components/ClusterObservabilityPlaneOverview').then(m => (
         <m.ClusterObservabilityPlaneStatusCard />
@@ -421,10 +583,21 @@ const clusterObservabilityPlaneStatusCard = EntityCardBlueprint.make({
 const clusterObservabilityPlaneLinkedPlanesCard = EntityCardBlueprint.make({
   name: 'cluster-observability-plane-linked-planes',
   params: {
-    filter: 'kind:clusterobservabilityplane',
+    filter: isOpenChoreoManagedOfKind('clusterobservabilityplane'),
     loader: () =>
       import('./components/ClusterObservabilityPlaneOverview').then(m => (
         <m.ClusterObservabilityPlaneLinkedPlanesCard />
+      )),
+  },
+});
+
+const notificationChannelConfigCard = EntityCardBlueprint.make({
+  name: 'notification-channel-config',
+  params: {
+    filter: isOpenChoreoManagedOfKind('observabilityalertsnotificationchannel'),
+    loader: () =>
+      import('./components/NotificationChannelOverview').then(m => (
+        <m.NotificationChannelConfigCard />
       )),
   },
 });
@@ -433,7 +606,7 @@ const clusterObservabilityPlaneLinkedPlanesCard = EntityCardBlueprint.make({
 const deploymentPipelineVisualizationCard = EntityCardBlueprint.make({
   name: 'deployment-pipeline-visualization',
   params: {
-    filter: 'kind:deploymentpipeline',
+    filter: isOpenChoreoManagedOfKind('deploymentpipeline'),
     loader: () =>
       import('./components/DeploymentPipelineOverview').then(m => (
         <m.DeploymentPipelineVisualization />
@@ -444,7 +617,7 @@ const deploymentPipelineVisualizationCard = EntityCardBlueprint.make({
 const promotionPathsCard = EntityCardBlueprint.make({
   name: 'promotion-paths',
   params: {
-    filter: 'kind:deploymentpipeline',
+    filter: isOpenChoreoManagedOfKind('deploymentpipeline'),
     loader: () =>
       import('./components/DeploymentPipelineOverview').then(m => (
         <m.PromotionPathsCard />
@@ -461,10 +634,7 @@ const promotionPathsCard = EntityCardBlueprint.make({
 const componentTypeOverviewCard = EntityCardBlueprint.make({
   name: 'component-type-overview',
   params: {
-    filter: entity =>
-      ['componenttype', 'clustercomponenttype'].includes(
-        entity.kind.toLowerCase(),
-      ),
+    filter: isOpenChoreoManagedOfKind('componenttype', 'clustercomponenttype'),
     loader: () =>
       import('./components/ComponentTypeOverview').then(m => (
         <m.ComponentTypeOverviewCard />
@@ -475,10 +645,7 @@ const componentTypeOverviewCard = EntityCardBlueprint.make({
 const resourceTypeOverviewCard = EntityCardBlueprint.make({
   name: 'resource-type-overview',
   params: {
-    filter: entity =>
-      ['resourcetype', 'clusterresourcetype'].includes(
-        entity.kind.toLowerCase(),
-      ),
+    filter: isOpenChoreoManagedOfKind('resourcetype', 'clusterresourcetype'),
     loader: () =>
       import('./components/ResourceTypeOverview').then(m => (
         <m.ResourceTypeOverviewCard />
@@ -489,8 +656,7 @@ const resourceTypeOverviewCard = EntityCardBlueprint.make({
 const traitTypeOverviewCard = EntityCardBlueprint.make({
   name: 'trait-type-overview',
   params: {
-    filter: entity =>
-      ['traittype', 'clustertraittype'].includes(entity.kind.toLowerCase()),
+    filter: isOpenChoreoManagedOfKind('traittype', 'clustertraittype'),
     loader: () =>
       import('./components/TraitTypeOverview').then(m => (
         <m.TraitTypeOverviewCard />
@@ -502,8 +668,7 @@ const traitTypeOverviewCard = EntityCardBlueprint.make({
 const workflowOverviewCard = EntityCardBlueprint.make({
   name: 'workflow-overview',
   params: {
-    filter: entity =>
-      ['workflow', 'clusterworkflow'].includes(entity.kind.toLowerCase()),
+    filter: isOpenChoreoManagedOfKind('workflow', 'clusterworkflow'),
     loader: () =>
       import('./components/WorkflowOverview').then(m => (
         <m.WorkflowOverviewCard />
@@ -514,7 +679,7 @@ const workflowOverviewCard = EntityCardBlueprint.make({
 const componentWorkflowOverviewCard = EntityCardBlueprint.make({
   name: 'component-workflow-overview',
   params: {
-    filter: 'kind:componentworkflow',
+    filter: isOpenChoreoManagedOfKind('componentworkflow'),
     loader: () =>
       import('./components/ComponentWorkflowOverview').then(m => (
         <m.ComponentWorkflowOverviewCard />
@@ -535,28 +700,373 @@ const componentWorkflowOverviewCard = EntityCardBlueprint.make({
  * ComponentType/ResourceType/TraitType + cluster variants,
  * Workflow/ClusterWorkflow/ComponentWorkflow).
  *
- * Host-only mounts (OpenChoreoAboutCard, EntityCatalogGraphCard with custom
- * relations, WorkflowsOrExternalCICard, the Overview FailedBuildSnackbar) stay
- * in `packages/app` and ride through `customAppModule` because they belong
- * to the host's composition layer, not to this plugin.
+ * The `page:catalog/entity` chrome override (compact header + styled tab
+ * bar via `OpenChoreoEntityLayout`) also ships from this plugin now, as
+ * `openChoreoEntityPageOverride` — see the re-export near the top of this
+ * file. It's a separate feature module external adopters opt into
+ * alongside the default plugin.
  */
-export default createFrontendPlugin({
+
+// ─── Entity context menu items ────────────────────────────────────────────
+const deleteEntityContextMenuItem = EntityContextMenuItemBlueprint.make({
+  name: 'delete-entity',
+  params: {
+    icon: <DeleteIcon fontSize="small" />,
+    filter: isDeletableOpenChoreoEntity,
+    useProps: useDeleteEntityContextMenuItemProps,
+  },
+});
+
+const editAnnotationsEntityContextMenuItem =
+  EntityContextMenuItemBlueprint.make({
+    name: 'edit-annotations',
+    params: {
+      icon: <EditIcon fontSize="small" />,
+      filter: isEditableAnnotationsEntity,
+      useProps: useAnnotationEditorContextMenuItemProps,
+    },
+  });
+
+// ─── Per-kind Overview layouts ────────────────────────────────────────────
+//
+// Each layout attaches to upstream's `entity-content:catalog/overview` via
+// `EntityContentLayoutBlueprint`. Upstream's Overview loader picks the
+// first layout whose filter matches; anything else falls back to
+// `DefaultEntityContentLayout` (upstream's 2-column info/content grid).
+//
+// Cluster variants of the type-family kinds (`clustercomponenttype`,
+// `clusterresourcetype`, `clusterprojecttype`, `clustertraittype`,
+// `clusterworkflow`) reuse the same layout module as their namespaced
+// counterparts — the visible Overview is identical; only the tab set /
+// entity-existence semantics differ, which the tab blueprints handle.
+
+const componentServiceOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'component-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('component'),
+    loader: () =>
+      import('./extensions/entityLayouts/ComponentOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const releaseLineOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'release-line-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('releaseline'),
+    loader: () =>
+      import('./extensions/entityLayouts/ReleaseLineOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const systemOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'system-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('system'),
+    loader: () =>
+      import('./extensions/entityLayouts/SystemOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const domainOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'domain-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('domain'),
+    loader: () =>
+      import('./extensions/entityLayouts/DomainOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const resourceOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'resource-overview',
+  params: {
+    // Only OC-managed resources get the bespoke layout — vanilla Resource
+    // entities fall back to upstream `DefaultEntityContentLayout`.
+    filter: isOpenChoreoManagedOfKind('resource'),
+    loader: () =>
+      import('./extensions/entityLayouts/ResourceOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const environmentOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'environment-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('environment'),
+    loader: () =>
+      import('./extensions/entityLayouts/EnvironmentOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const dataplaneOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'dataplane-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('dataplane'),
+    loader: () =>
+      import('./extensions/entityLayouts/DataplaneOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const clusterDataplaneOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'cluster-dataplane-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('clusterdataplane'),
+    loader: () =>
+      import('./extensions/entityLayouts/ClusterDataplaneOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const workflowPlaneOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'workflow-plane-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('workflowplane'),
+    loader: () =>
+      import('./extensions/entityLayouts/WorkflowPlaneOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const clusterWorkflowPlaneOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'cluster-workflow-plane-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('clusterworkflowplane'),
+    loader: () =>
+      import(
+        './extensions/entityLayouts/ClusterWorkflowPlaneOverviewLayout'
+      ).then(m => m.default),
+  },
+});
+
+const observabilityPlaneOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'observability-plane-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('observabilityplane'),
+    loader: () =>
+      import(
+        './extensions/entityLayouts/ObservabilityPlaneOverviewLayout'
+      ).then(m => m.default),
+  },
+});
+
+const clusterObservabilityPlaneOverviewLayout =
+  EntityContentLayoutBlueprint.make({
+    name: 'cluster-observability-plane-overview',
+    params: {
+      filter: isOpenChoreoManagedOfKind('clusterobservabilityplane'),
+      loader: () =>
+        import(
+          './extensions/entityLayouts/ClusterObservabilityPlaneOverviewLayout'
+        ).then(m => m.default),
+    },
+  });
+
+const notificationChannelOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'notification-channel-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('observabilityalertsnotificationchannel'),
+    loader: () =>
+      import(
+        './extensions/entityLayouts/NotificationChannelOverviewLayout'
+      ).then(m => m.default),
+  },
+});
+
+const deploymentPipelineOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'deployment-pipeline-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('deploymentpipeline'),
+    loader: () =>
+      import(
+        './extensions/entityLayouts/DeploymentPipelineOverviewLayout'
+      ).then(m => m.default),
+  },
+});
+
+const componentTypeOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'component-type-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('componenttype', 'clustercomponenttype'),
+    loader: () =>
+      import('./extensions/entityLayouts/ComponentTypeOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const resourceTypeOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'resource-type-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('resourcetype', 'clusterresourcetype'),
+    loader: () =>
+      import('./extensions/entityLayouts/ResourceTypeOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const projectTypeOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'project-type-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('projecttype', 'clusterprojecttype'),
+    loader: () =>
+      import('./extensions/entityLayouts/ProjectTypeOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const traitTypeOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'trait-type-overview',
+  params: {
+    filter: isOpenChoreoManagedOfKind('traittype', 'clustertraittype'),
+    loader: () =>
+      import('./extensions/entityLayouts/TraitTypeOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const workflowOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'workflow-overview-layout',
+  params: {
+    filter: isOpenChoreoManagedOfKind('workflow', 'clusterworkflow'),
+    loader: () =>
+      import('./extensions/entityLayouts/WorkflowOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+const componentWorkflowOverviewLayout = EntityContentLayoutBlueprint.make({
+  name: 'component-workflow-overview-layout',
+  params: {
+    filter: isOpenChoreoManagedOfKind('componentworkflow'),
+    loader: () =>
+      import('./extensions/entityLayouts/ComponentWorkflowOverviewLayout').then(
+        m => m.default,
+      ),
+  },
+});
+
+import { scaffolderFieldExtensions } from './scaffolder/extensions';
+import { FormDecoratorBlueprint } from '@backstage/plugin-scaffolder-react/alpha';
+import { openChoreoTokenDecorator } from './scaffolder/openChoreoTokenDecorator';
+
+const openChoreoUserTokenFormDecorator = FormDecoratorBlueprint.make({
+  name: 'openchoreo-user-token',
+  params: { decorator: openChoreoTokenDecorator },
+});
+
+// Org-level settings tabs. These were previously exported as plain components,
+// so a host had to mount them by hand and feature discovery could not surface
+// them at all. They attach to upstream's user-settings page rather than
+// standing alone, which is where the OpenChoreo portal already puts them — so
+// every host, portal or not, gets them in the same place. A host that would
+// rather place them itself can switch them off through `app.extensions`.
+// The loader result renders inside upstream's `Page` component, whose CSS
+// grid places `Content` in the `pageContent` cell (the `1fr` column). Without
+// the wrapper the body is auto-placed and shrinks to its intrinsic width —
+// upstream's own General/Auth/Feature-Flags sub-pages wrap in `Content` for
+// the same reason.
+const accessControlSettingsTab = SubPageBlueprint.make({
+  name: 'access-control',
+  attachTo: { id: 'page:user-settings', input: 'pages' },
+  params: {
+    path: 'access-control',
+    routeRef: accessControlRouteRef,
+    title: 'Access Control',
+    loader: () =>
+      import('./components/AccessControl').then(m => (
+        <Content>
+          <m.AccessControlContent />
+        </Content>
+      )),
+  },
+});
+
+const secretsSettingsTab = SubPageBlueprint.make({
+  name: 'secrets',
+  attachTo: { id: 'page:user-settings', input: 'pages' },
+  params: {
+    path: 'secrets',
+    routeRef: secretsRouteRef,
+    title: 'Secrets',
+    loader: () =>
+      import('./components/Secrets').then(m => (
+        <Content>
+          <m.SecretsContent />
+        </Content>
+      )),
+  },
+});
+
+// Opened via window.open() from the resource drawer; no title/icon = no nav item.
+const execTerminalPage = PageBlueprint.make({
+  name: 'exec-terminal',
+  params: {
+    path: '/exec-terminal',
+    routeRef: execTerminalRouteRef,
+    noHeader: true,
+    loader: () =>
+      import('./components/Terminal/ExecTerminalWindowPage').then(m => (
+        <m.ExecTerminalWindowPage />
+      )),
+  },
+});
+
+/**
+ * The OpenChoreo frontend plugin: entity tabs and cards, scaffolder field
+ * extensions and the org-level pages.
+ *
+ * Prefer the default export of this entry point, which also carries the
+ * module the plugin needs in order to function.
+ */
+export const openChoreoPlugin = createFrontendPlugin({
   pluginId: 'openchoreo',
   routes: {
     catalogEnvironment: rootCatalogEnvironmentRouteRef,
     accessControl: accessControlRouteRef,
+    secrets: secretsRouteRef,
+    execTerminal: execTerminalRouteRef,
     resourceEnvironments: resourceEnvironmentsRouteRef,
   },
   extensions: [
     openChoreoClientApi,
+    openChoreoAuthApi,
+    openChoreoTokenApi,
+    openChoreoFetchApi,
+    accessControlSettingsTab,
+    secretsSettingsTab,
     queryProvider,
+    execTerminalPage,
+    deleteEntityContextMenuItem,
+    editAnnotationsEntityContextMenuItem,
     resourceDefinitionEntityContent,
+    releaseLineDefinitionEntityContent,
     componentDeployEntityContent,
     deploymentStatusCard,
     runtimeHealthCard,
+    projectDeployEntityContent,
     cellDiagramEntityContent,
+    projectDiagramEntityContent,
     projectContentsCard,
     deploymentPipelineCard,
+    namespaceCellDiagramEntityContent,
     namespaceProjectsCard,
     namespaceResourcesCard,
     resourceDeployEntityContent,
@@ -579,6 +1089,7 @@ export default createFrontendPlugin({
     observabilityPlaneLinkedPlanesCard,
     clusterObservabilityPlaneStatusCard,
     clusterObservabilityPlaneLinkedPlanesCard,
+    notificationChannelConfigCard,
     deploymentPipelineVisualizationCard,
     promotionPathsCard,
     componentTypeOverviewCard,
@@ -586,5 +1097,54 @@ export default createFrontendPlugin({
     traitTypeOverviewCard,
     workflowOverviewCard,
     componentWorkflowOverviewCard,
+    ...scaffolderFieldExtensions,
+    openChoreoUserTokenFormDecorator,
+    // per-kind Overview layouts
+    componentServiceOverviewLayout,
+    releaseLineOverviewLayout,
+    systemOverviewLayout,
+    domainOverviewLayout,
+    resourceOverviewLayout,
+    environmentOverviewLayout,
+    dataplaneOverviewLayout,
+    clusterDataplaneOverviewLayout,
+    workflowPlaneOverviewLayout,
+    clusterWorkflowPlaneOverviewLayout,
+    observabilityPlaneOverviewLayout,
+    clusterObservabilityPlaneOverviewLayout,
+    notificationChannelOverviewLayout,
+    deploymentPipelineOverviewLayout,
+    componentTypeOverviewLayout,
+    resourceTypeOverviewLayout,
+    projectTypeOverviewLayout,
+    traitTypeOverviewLayout,
+    workflowOverviewLayout,
+    componentWorkflowOverviewLayout,
   ],
+});
+
+/**
+ * Default export for `@openchoreo/backstage-plugin/alpha`.
+ *
+ * A feature loader rather than the plugin alone, so that the plugin arrives
+ * together with the module it cannot function without. `openChoreoAppModule`
+ * supplies the shared query client and the `fetchApi`/`permissionApi`
+ * overrides that attach the user's IDP token — without it the entity tabs
+ * mount and then throw on first render.
+ *
+ * This is what makes the plugin work under Backstage's feature discovery,
+ * which is on by default in new apps: discovery only reads the default export
+ * of a package's root and `./alpha` entry points, so a named export alongside
+ * this one is never picked up on its own.
+ *
+ * `openChoreoEntityGroupsModule` is deliberately not bundled here. It is
+ * recommended rather than required, and hosts that pin their own entity tab
+ * groups should not have ours applied implicitly — add it to
+ * `createApp({ features })` to get the canonical OpenChoreo tab order.
+ *
+ * Listing either of these explicitly as well is harmless: a module applied
+ * twice simply re-applies the same implementation.
+ */
+export default createFrontendFeatureLoader({
+  loader: () => [openChoreoPlugin, openChoreoAppModule],
 });

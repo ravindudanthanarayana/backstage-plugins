@@ -45,6 +45,45 @@ export type HttpMetrics = {
 
 export type MetricType = 'resource' | 'http';
 
+/** The four component-level series shapes, each keyed by fixed metric names. */
+export type ComponentSeriesMap =
+  | CpuUsageMetrics
+  | MemoryUsageMetrics
+  | NetworkThroughputMetrics
+  | NetworkLatencyMetrics;
+
+/** `metricKey -> points` for one component, e.g. `{ cpuUsage: [...] }`. */
+export type MetricSeriesMap = Record<string, MetricsTimeSeriesItem[]>;
+
+/**
+ * `componentName -> points` for one metric: the lines of one breakdown chart.
+ *
+ * The component is the key, so nothing is ever spliced into a string or
+ * parsed. The unique `dataKey` Recharts needs per line is generated inside the
+ * chart and never leaves it.
+ */
+export type ComponentPoints = Record<string, MetricsTimeSeriesItem[]>;
+
+/** A component whose fan-out request failed, kept so the page can render the
+ *  rest and still name what is missing. */
+export type FailedComponentMetrics = {
+  name: string;
+  error: string;
+};
+
+/**
+ * The per-component fan-out, keyed metric first so each chart reads one entry.
+ *
+ * Resource and HTTP fan-outs share this shape. Metric keys are unique across
+ * every group (`cpuUsage`, `memoryLimits`, `latencyP99`, ...), so one flat map
+ * holds either.
+ */
+export type ProjectMetrics = {
+  /** metricKey -> componentName -> points, e.g. `byMetric.cpuUsage.api` */
+  byMetric: Record<string, ComponentPoints>;
+  failedComponents: FailedComponentMetrics[];
+};
+
 // OTel span status ({ code: 'ok' | 'error' | 'unset', message? }) from the spec.
 export type SpanStatus = ObservabilityComponents['schemas']['SpanStatus'];
 
@@ -87,7 +126,17 @@ export interface Filters {
   components?: string[];
   searchQuery?: string;
   rcaStatus?: RCAStatus;
+  /** Project metrics only. Which of the two views the charts show. */
+  view?: MetricsViewMode;
 }
+
+/**
+ * The two views of the project Metrics tab.
+ *
+ * - `total` — one project-wide aggregate, charted like the component tab.
+ * - `breakdown` — one line per selected component, one chart per metric.
+ */
+export type MetricsViewMode = 'total' | 'breakdown';
 
 export type RCAStatus = 'pending' | 'completed' | 'failed';
 
@@ -122,6 +171,8 @@ export interface AlertSummary {
   sourceMetric?: string;
   projectName?: string;
   componentName?: string;
+  /** Release line of the component, absent for components without lines. */
+  releaseLineName?: string;
   environmentName?: string;
   namespaceName?: string;
   notificationChannels?: string[];
@@ -142,6 +193,8 @@ export interface IncidentSummary {
   incidentTriggerAiCostAnalysis?: boolean;
   projectName?: string;
   componentName?: string;
+  /** Release line of the component, absent for components without lines. */
+  releaseLineName?: string;
   environmentName?: string;
   namespaceName?: string;
 }
@@ -156,6 +209,8 @@ export interface FinOpsReportSummary {
   project: string;
   environment?: string | null;
   component?: string | null;
+  /** Release line the budget alert fired on, for components with lines. */
+  releaseLine?: string | null;
   timestamp: string;
   summary?: string | null;
   status: FinOpsReportStatus;
@@ -167,6 +222,8 @@ export interface FinOpsReportDetailed {
   project: string;
   environment?: string | null;
   component?: string | null;
+  /** Release line the budget alert fired on, for components with lines. */
+  releaseLine?: string | null;
   timestamp: string;
   status: FinOpsReportStatus;
   report?: FinOpsReport | null;
@@ -242,6 +299,148 @@ export interface InvestigationStep {
   action: string;
   outcome: string;
   rationale?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Delivery Insights (DORA metrics)
+// ---------------------------------------------------------------------------
+
+export type DoraGranularity = 'daily' | 'weekly' | 'monthly';
+
+export type DoraMetricName =
+  | 'deploymentFrequency'
+  | 'leadTime'
+  | 'changeFailureRate'
+  | 'mttr';
+
+/** DORA performance tier for a summary value, computed by the observer. */
+export type DoraClassification =
+  | 'Elite'
+  | 'High'
+  | 'Medium'
+  | 'Low'
+  | 'Unknown';
+
+/** Scope of a DORA query: namespace-only = org level; add project/component to narrow. */
+export interface DoraSearchScope {
+  namespace: string;
+  project?: string;
+  component?: string;
+  environment?: string;
+  /** Release line of the component; requires `component`. */
+  releaseLine?: string;
+  /** Covers every line of the component; without it, a component covers its main line. */
+  allReleaseLines?: boolean;
+}
+
+export interface DoraFrequencySummary {
+  total: number;
+  perDay: number;
+  classification: DoraClassification;
+  /** Change vs the preceding window of equal length (%); null without a baseline. */
+  deltaPct: number | null;
+}
+
+export interface DoraLeadTimeSummary {
+  p50Ms: number | null;
+  p95Ms: number | null;
+  /** Fraction of deployments carrying commit provenance (lead-time input). */
+  coverage: number;
+  classification: DoraClassification;
+  deltaPct: number | null;
+}
+
+export interface DoraChangeFailureRateSummary {
+  rate: number;
+  failed: number;
+  total: number;
+  classification: DoraClassification;
+  deltaPct: number | null;
+}
+
+export interface DoraMttrSummary {
+  meanMs: number | null;
+  p50Ms: number | null;
+  recoveries: number;
+  classification: DoraClassification;
+  deltaPct: number | null;
+}
+
+/**
+ * Why the metrics beside it might be empty, reported on every response. An empty
+ * result is otherwise ambiguous: a scope that deployed nothing looks exactly
+ * like an observer that was never configured to collect.
+ */
+export interface DoraDataAvailability {
+  /** False means nothing is being written, so every metric stays empty. */
+  collecting?: boolean;
+  /**
+   * Whether the deployed logs adapter can serve the delivery event sweep.
+   * Observed rather than configured: an adapter that cannot answers 501 and the
+   * aggregator stands the sweep down. False leaves deployment frequency, lead
+   * time and change failure rate without input; MTTR comes from incidents and is
+   * unaffected.
+   */
+  deliveryEvents?: boolean;
+}
+
+export interface DoraMetricsResponse {
+  dataAvailability?: DoraDataAvailability;
+  scope: DoraSearchScope;
+  granularity: DoraGranularity;
+  window: { startTime: string; endTime: string; generatedAt: string };
+  summary: {
+    deploymentFrequency?: DoraFrequencySummary;
+    leadTime?: DoraLeadTimeSummary;
+    changeFailureRate?: DoraChangeFailureRateSummary;
+    mttr?: DoraMttrSummary;
+  };
+  series: {
+    /** Zero-filled: one entry per bucket in the window. */
+    deploymentFrequency?: { bucketStart: string; count: number }[];
+    /** Only buckets with data appear. */
+    leadTime?: {
+      bucketStart: string;
+      p50Ms: number;
+      p75Ms: number;
+      p95Ms: number;
+    }[];
+    /** Zero-filled: one entry per bucket in the window. */
+    changeFailureRate?: {
+      bucketStart: string;
+      rate: number;
+      failed: number;
+      total: number;
+    }[];
+    /** Only buckets with data appear. */
+    mttr?: {
+      bucketStart: string;
+      meanMs: number;
+      p50Ms: number;
+      count: number;
+    }[];
+  };
+}
+
+export interface DoraDeployment {
+  deployedAt: string;
+  projectName: string;
+  componentName: string;
+  environmentName: string;
+  componentRelease: string;
+  /** Full commit SHA; empty when provenance is missing. */
+  commit: string;
+  outcome: 'success' | 'failed' | 'in_progress';
+  failedBy: string;
+  failureReason: string;
+  incidentId: string;
+  leadTimeMs: number | null;
+}
+
+export interface DoraDeploymentsResponse {
+  deployments: DoraDeployment[];
+  totalCount: number;
+  tookMs: number;
 }
 
 // -- Cost Insights types (from the observer FinOps cost/recommendation APIs) --

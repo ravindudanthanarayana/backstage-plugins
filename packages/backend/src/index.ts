@@ -7,6 +7,10 @@
  */
 
 import { createBackend } from '@backstage/backend-defaults';
+import {
+  coreServices,
+  createBackendFeatureLoader,
+} from '@backstage/backend-plugin-api';
 import { portalBackendFeatures } from '@openchoreo/backstage-portal-backend';
 
 // Guest mode: when OpenChoreo auth is explicitly disabled, the portal has no
@@ -32,12 +36,39 @@ backend.add(portalBackendFeatures);
 // For production, config is in app-config.production.yaml with Helm-injected env vars
 // backend.add(import('@immobiliarelabs/backstage-plugin-gitlab-backend'));
 
+// portal-template:strip-start
 // Portal Assistant backend — forwards Portal Assistant frontend traffic to the
 // portal-assistant service in the OpenChoreo control plane. Plugin
 // self-disables when openchoreo.portalAssistantUrl is not set.
-// (Private package — deliberately not part of the published portal bundle.)
+// (Private package — deliberately not part of the published portal bundle;
+// the strip markers let the create-portal template generator drop this block.)
 backend.add(
   import('@openchoreo/backstage-plugin-openchoreo-portal-assistant-backend'),
+);
+// portal-template:strip-end
+
+// Tech Insights scorecards (not part of the published portal bundle), behind
+// techInsights.scorecards.enabled, the key the scorecards frontend reads, with
+// the same default so the page and its backend are never out of step. Turned
+// off, nothing is installed, so no fact collector runs and no check route is
+// served; the stored checks and facts stay in the database. The jsonfc module
+// is deliberately not added: dynamic-checks calls setFactCheckerFactory
+// itself, and that extension point keeps only the last factory registered.
+backend.add(
+  createBackendFeatureLoader({
+    deps: { config: coreServices.rootConfig },
+    *loader({ config }) {
+      if (
+        !(config.getOptionalBoolean('techInsights.scorecards.enabled') ?? true)
+      ) {
+        return;
+      }
+      yield import('@backstage-community/plugin-tech-insights-backend');
+      yield import(
+        '@openchoreo/backstage-plugin-tech-insights-backend-module-dynamic-checks'
+      );
+    },
+  }),
 );
 
 backend.start();

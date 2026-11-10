@@ -1,15 +1,31 @@
 {
   "name": "@openchoreo/backstage-plugin-openchoreo-portal-assistant",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
   "license": "Apache-2.0",
   "//": "private+publishConfig is the canonical Backstage workspace pattern (see every sibling plugin). private:true blocks accidental yarn publish during day-to-day work; the Backstage CLI's prepack swaps private off and merges publishConfig.* to top-level fields at release time, where access:'public' is needed for scoped packages (npm defaults to 'restricted'). The pair is intentionally co-resident; do NOT remove either key in isolation.",
   "private": true,
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./alpha": "./src/alpha.tsx",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "alpha": [
+        "src/alpha.tsx"
+      ],
+      "package.json": [
+        "package.json"
+      ]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "main": "dist/index.esm.js",
-    "types": "dist/index.d.ts"
+    "types": "dist/index.d.ts",
+    "alpha": "dist/alpha.esm.js"
   },
   "repository": {
     "type": "git",
@@ -37,17 +53,21 @@
     "@backstage/catalog-model": "^1.9.0",
     "@backstage/core-components": "^0.18.10",
     "@backstage/core-plugin-api": "^1.12.6",
+    "@backstage/frontend-plugin-api": "^0.17.0",
+    "@backstage/plugin-app-react": "^0.2.3",
     "@backstage/plugin-catalog-react": "^3.0.0",
     "@material-ui/core": "4.12.4",
     "@material-ui/icons": "4.11.3",
     "@openchoreo/backstage-plugin-common": "workspace:^",
     "@openchoreo/backstage-plugin-openchoreo-ci": "workspace:^",
+    "@openchoreo/backstage-plugin-openchoreo-observability": "workspace:^",
     "@openchoreo/backstage-plugin-react": "workspace:^",
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.1",
     "remend": "^1.0.0"
   },
   "peerDependencies": {
+    "@openchoreo/backstage-plugin": "^1.4.0-m.2",
     "react": "18.0.0",
     "react-router-dom": "6.0.0"
   },

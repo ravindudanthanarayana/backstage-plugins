@@ -1,5 +1,489 @@
 # @openchoreo/backstage-plugin
 
+## 2.0.0-next.2
+
+### Minor Changes
+
+- 1cec15b: Notification channels can send HTML email bodies. The create form exposes the email
+  template's `contentType` (`text/plain` or `text/html`), the scaffolder action forwards it to the
+  OpenChoreo API, and the channel overview card shows it. The client is regenerated for the new
+  `NotificationEmailTemplate.contentType` field.
+
+### Patch Changes
+
+- Updated dependencies [633aedd]
+- Updated dependencies [ae74877]
+  - @openchoreo/cell-diagram@2.0.0-next.2
+  - @openchoreo/backstage-plugin-common@2.0.0-next.2
+  - @openchoreo/backstage-plugin-react@2.0.0-next.2
+
+## 1.4.0-m.1
+
+### Minor Changes
+
+- d19949b: Contribute Access Control and Secrets as tabs on Backstage's user-settings
+  page, so a host that installs the plugin gets them without wiring anything.
+
+  `AccessControlPage` and `SecretsPage` were exported as plain components.
+  Nothing mounted them, they had no route, and feature discovery could not
+  surface them — the only page this plugin registered was the exec terminal.
+
+  They now ship as `SubPageBlueprint` extensions attached to `page:user-settings`
+  at `access-control` and `secrets`. Settings tabs rather than standalone pages,
+  because that is where the OpenChoreo portal already places them: every host
+  ends up with the same layout instead of the portal and its adopters diverging.
+  A host that would rather place them itself can switch them off through
+  `app.extensions`.
+
+  Adds a `secretsRouteRef` alongside the existing `accessControlRouteRef` and
+  exposes it on the plugin's `routes` map for binding.
+
+- c15ee42: Make `@openchoreo/backstage-plugin/alpha` work under Backstage feature
+  discovery. The default export is now a feature loader that yields the plugin
+  together with `openChoreoAppModule`, instead of the plugin on its own.
+
+  Feature discovery is enabled by default in new Backstage apps, but it only
+  reads the _default_ export of a package's root and `./alpha` entry points.
+  `openChoreoAppModule` was a named export, so a host that relied on discovery
+  got the plugin without it — the entity tabs mounted and then threw on first
+  render, because that module is what supplies the shared query client and the
+  `fetchApi`/`permissionApi` overrides that attach the user's IDP token.
+
+  `openChoreoEntityGroupsModule` is intentionally left out of the bundle: it is
+  recommended rather than required, and hosts that pin their own entity tab
+  groups should not have ours applied implicitly.
+
+  The plugin itself is still available as the named export `openChoreoPlugin`,
+  and listing any of these explicitly in `createApp({ features })` keeps
+  working — a module applied twice simply re-applies the same implementation.
+
+- f5ca212: Notification channels read their secret values from SecretReferences. The create form picks
+  SMTP credentials and webhook header secrets from the namespace's SecretReferences (those with no
+  target plane or targeting an observability plane), with a key dropdown, instead of free-text
+  Kubernetes Secret names. The channel's overview card shows its secret references with their keys,
+  its Ready status, and a warning when it still copies values from Kubernetes Secrets, which is
+  deprecated. The Secrets page can create secrets in an `ObservabilityPlane` or
+  `ClusterObservabilityPlane` secret store, and the client is regenerated for the observability
+  plane `secretStoreRef`, the new target plane kinds and the channel status conditions.
+- 44795b9: Stop overriding the app-wide fetch API and attach the OpenChoreo user token to
+  OpenChoreo requests only.
+
+  `openChoreoAppModule` registered an `api:app/core.fetch` override. In the
+  portal that was invisible, but in any other Backstage host it replaced the
+  app's own fetch API for every installed plugin — dropping the default
+  middleware chain (`plugin://` resolution, failure clarification, and identity
+  injection scoped to the host's own `backend.baseUrl`) and attaching both the
+  Backstage token and the OpenChoreo IDP token to every outbound request
+  regardless of destination.
+
+  Requests bound for an OpenChoreo backend now go through a new
+  `openChoreoFetchApiRef`, which decorates the host's `fetchApiRef` instead of
+  replacing it. The host keeps its middleware, and OpenChoreo credentials travel
+  only to OpenChoreo.
+
+  Destinations are checked rather than trusted: the IDP token is attached only to
+  requests bound for `backend.baseUrl`, so a caller passing an unrelated URL
+  cannot send the user's credentials to a third party. Direct mode (the
+  `x-openchoreo-direct` signal) remains an explicit per-request opt-in for
+  external OpenChoreo services.
+
+  The token itself comes from a new `openChoreoTokenApiRef` capability rather
+  than from a named auth provider. The default implementation sources it from the
+  `openchoreo-auth` OAuth provider exactly as before, so nothing changes for the
+  portal; a host whose own session already carries an OpenChoreo-accepted token
+  can now override that one API instead of forking the plugins.
+
+  `OpenChoreoFetchApi` from `@openchoreo/backstage-plugin` is deprecated and no
+  longer registered. `OPENCHOREO_TOKEN_HEADER` and `OPENCHOREO_DIRECT_HEADER` are
+  now exported from `@openchoreo/backstage-plugin-common` as the single
+  definition shared by both sides of the wire.
+
+- 11907a6: Ship the OpenChoreo light and dark themes to every host that installs the
+  plugins, instead of keeping them private to the portal.
+
+  The built `AppTheme` entries, the `app.branding` reader, and the config schema
+  that declares it all lived in `packages/portal-app`, which is not published. An
+  external Backstage app installing the OpenChoreo plugins therefore rendered our
+  surfaces against the stock Backstage palette: wrong contrast, a dark mode that
+  painted `--bui-bg-app` grey, and no way to set a brand color.
+
+  The design system now owns them. It exports `appThemes` plus `useBranding`,
+  `brandName`, `readBrandingConfig`, and `DEFAULT_BRAND_NAME`, and carries the
+  `app.branding.*` config schema. `openChoreoAppModule` registers both themes as
+  `ThemeBlueprint` extensions, so feature discovery hands them to any host. They
+  are additive — the host's own themes stay in the picker, and either can be
+  turned off through `app.extensions`.
+
+  `theme.light.primaryColor` and `theme.dark.primaryColor` now apply anywhere the
+  themes are registered. `name`, `iconLogo`, and `fullLogo` still drive only the
+  OpenChoreo portal's sidebar and sign-in card, since a host supplies its own
+  app shell.
+
+- cdc4c6e: Support components with release lines.
+
+  - Every component has an implicit `main` line, built from the component's own workload and bindings. Its other lines are ReleaseLine resources, synced to the catalog as a new `ReleaseLine` kind, part of their component and visible to whoever can view the component. They are not listed in the catalog viewer or search, and are reached from their component's Overview.
+  - Components are created as before. Any component's context menu offers Create Release Line. Once a component has a release line, its Overview lists its lines, `main` first, with their environments, latest release and overrides. The component's own tabs work on the main line, which can't be edited, deleted or created. The names `main` and `default` are rejected for a new line: `main` is the implicit line, and `default` is reserved.
+  - Each release line has its own page with the component's tabs (build, deploy, logs, metrics, ...) scoped to that line. Its Definition tab edits the properties the line overrides, next to the properties it inherits from the component, which are read-only and edited on the component's Definition page.
+  - The `main` keyword is never written into a resource or request: releases, deploys, workload saves, dependencies and builds for the main line leave the release line empty. A dependency on a component with release lines picks the main line or one of its release lines, the main line unless chosen otherwise.
+  - The project cell diagram shows the main line and each release line of a component as their own nodes, labelled with the component name and a pill with the line name, with a Release line filter. Dependencies link to the line they name, or to the main line, and gateway metrics are scoped per line. Clicking a line node opens the line's page.
+  - Runtime logs, events, metrics, alerts, project logs, metrics, traces and incidents, cost insights and cost analysis reports get a Release line filter of All lines, `main` or one line, shown for a component with release lines. On a release line's page they are scoped to the line. Alert and incident details show the release line when there is one, and the observability API reports clearly when the installed FinOps module cannot filter costs by line.
+  - The Delivery Insights page shows a Release line filter when the selected component has release lines, narrowing the metrics and the per-environment breakdown to `main` or one line.
+  - An RCA report's Incident Overview shows the release line the alert fired on.
+  - Cost analysis reports show their line in their overview and in the reports list, and link to the line's page and metrics, or the component's for the main line. Apply Recommendation names the release binding it updates and refuses a binding that belongs to another line.
+  - Cost Insights applies a recommendation to the binding of the selected release line, and refuses a binding of another line. For a component with release lines, Apply is disabled until a line is chosen, since a recommendation for all lines matches no single binding.
+  - Workflow runs returned by the workflows backend include their labels, so a run can be matched to its release line.
+  - The environment overview lists each release line deployed in an environment as its own row, linked to the line's page, and Recent Deployments shows release lines next to components. `GET /release-bindings` returns the main line's bindings without a line, and every line's with `allReleaseLines=true`.
+  - The unused `promoteToEnvironment` client method and the backend `/promote-deployment` route are removed. The OpenChoreo API no longer has the promote endpoint they called, and the Promote action deploys through the release binding instead.
+  - A new release line's Workload and bindings are named as OpenChoreo names a line's objects, `{component}-{line}-{hash}`, so they never take a name another component needs. Deploy, promote, saving overrides and removing a deployment find a line's binding by its owner (component, line and environment) rather than by name, since a binding created elsewhere may be named otherwise.
+
+  Components without release lines behave as before.
+
+### Patch Changes
+
+- f5ca212: Restore the Overview tab of notification channels, which has been empty since the entity pages moved to the
+  New Frontend System. It shows the channel's configuration card again, with the About card and a catalog graph
+  of the alert rules that notify the channel.
+- c67978a: Replace Backstage CLI boilerplate in published package descriptions and READMEs with
+  real ones, so the npm listings describe what each package does and point at the install
+  guide. No code changes.
+- 3275f94: Fix narrow rendering of the Access Control and Secrets settings tabs.
+
+  The `SubPageBlueprint` loaders returned bare `<AccessControlContent />` /
+  `<SecretsContent />`. When upstream's `page:user-settings` is rendered under
+  a `<Page>`-based `core.page-layout` (what the OpenChoreo portal uses), the
+  body ends up directly inside `<Page>`'s CSS grid without claiming the
+  `pageContent` grid area, so it shrinks to its intrinsic width.
+
+  Wrap both loader results in `<Content>` — the same pattern upstream's own
+  General / Auth Providers / Feature Flags sub-pages use. Behavior under the
+  default (flex-based) page layout is unchanged; the wrapper just adds the
+  standard Backstage sub-page padding.
+
+- Updated dependencies [9e3a840]
+- Updated dependencies [f5ca212]
+- Updated dependencies [44795b9]
+- Updated dependencies [c67978a]
+- Updated dependencies [11907a6]
+- Updated dependencies [cdc4c6e]
+  - @openchoreo/backstage-plugin-common@2.0.0-next.0
+  - @openchoreo/backstage-plugin-react@2.0.0-next.0
+  - @openchoreo/backstage-design-system@2.0.0-next.0
+  - @openchoreo/cell-diagram@2.0.0-next.0
+
+## 1.3.0
+
+### Minor Changes
+
+- 67ba0da: Add a per-row "Delete" action to the Project Contents table so a component
+  can be deleted directly from the project listing without opening the
+  component page first. The action surfaces as a per-row delete button for
+  both component and resource rows (hidden for rows already marked for
+  deletion), reuses the shared delete-confirmation dialog, and optimistically
+  marks the row for deletion until the next catalog sync drops it.
+- 2564efb: Ship the OpenChoreo frontend integration surface out of the base plugin so
+  adopters no longer copy-paste boilerplate into their `packages/app/`.
+  `@openchoreo/backstage-plugin/alpha` now exports:
+
+  - **`openChoreoAppModule`** — a `createFrontendModule({ pluginId: 'app' })`
+    that wraps the app root in `OpenChoreoQueryProvider` and overrides
+    `fetchApiRef` + `permissionApiRef` with the OpenChoreo IDP-token-aware
+    implementations. Previously each adopter had to hand-copy the
+    `OpenChoreoFetchApi` / `OpenChoreoPermissionApi` classes plus three
+    `ApiBlueprint.make(...)` factories (~150 lines) into a local
+    `customAppModule.tsx`.
+  - **`openChoreoEntityGroupsModule`** — an opt-in
+    `createFrontendModule({ pluginId: 'catalog' })` that overrides
+    `page:catalog/entity`'s `groupDefinitions` with the canonical OpenChoreo
+    tab order (Definition → Build → Deploy → Cell Diagram → …). Every OC tab
+    uses a unique `group:` key so the vanilla NFS dropdown-collapse never
+    triggers and tabs render flat. Non-OC entity pages are unaffected — the
+    six upstream default group names are retained in their vanilla relative
+    order.
+  - **`openChoreoAuthApiRef`**, **`OpenChoreoFetchApi`**,
+    **`OpenChoreoPermissionApi`** — surfaced as public exports so
+    `customAppModule.tsx` can reference them without local re-declaration.
+  - **`openchoreo:inject-user-token`** scaffolder form decorator — now
+    registered automatically as a `FormDecoratorBlueprint` extension.
+    Templates that opt in via `EXPERIMENTAL_formDecorators` in their spec get
+    the signed-in user's IDP token injected as the `OPENCHOREO_USER_TOKEN`
+    template secret with no adopter-side wiring.
+
+  Group values on OpenChoreo entity content tabs were also uniqued across the
+  three plugins (`deployment` → `deploy` / `build` / `cell-diagram` /
+  `diagram`, `runtime` → `logs` / `events` / `metrics` / `alerts` /
+  `wirelogs`, `analysis` → `traces` / `incidents` / `rca-reports` /
+  `cost-analysis`). Combined with `openChoreoEntityGroupsModule` this
+  guarantees flat tab rendering under vanilla NFS chrome.
+
+  Portal-app is unchanged for users. Internally, the plugin-owned modules
+  replace ~200 lines of previously-hand-copied wiring in
+  `packages/portal-app/src/apis/customOverrides.tsx` and
+  `packages/portal-app/src/appModule.tsx`, and the standalone
+  `openChoreoTokenDecorator.ts` file in `packages/portal-app/src/scaffolder/`
+  is deleted.
+
+- 67ba0da: Generalize the listing row delete beyond components. The new
+  `useDeleteEntityDialog` hook (replacing `useDeleteComponentDialog`) dispatches
+  deletes for every kind the OpenChoreo API supports — components, projects,
+  namespaces, resources and the platform resource kinds — sharing one dispatch
+  with the entity-page context menu. A reusable `RowDeleteButton` +
+  `usePendingDeletionOverlay` pair wires per-row delete (with an optimistic
+  "marked for deletion" badge) into the catalog "All ..." pages, the namespace
+  projects/resources cards, and extends the Project Contents row action to
+  resource rows.
+- ce31a0e: Migrate entity pages to the Backstage New Frontend System. The hand-authored `EntityPage.tsx` in `packages/portal-app` (and its supporting files `EntityLayoutWithDelete.tsx`, `OpenChoreoCatalogEntityPage.tsx`, `WorkflowsOrExternalCICard.tsx`) is gone; tabs, cards, per-kind Overview layouts, and delete / annotation context menu items now ship as NFS blueprints from the plugins. Adopters installing `@openchoreo/backstage-plugin` in their own Backstage get the same OpenChoreo tabs and Overview grids as the portal automatically — no hand-authored `EntityPage.tsx` required.
+
+  **New public exports from `@openchoreo/backstage-plugin`:**
+
+  - `openChoreoEntityPageOverride` (from `/alpha`) — opt-in FrontendModule that swaps the canonical entity-page chrome for `OpenChoreoEntityLayout` (compact header + styled tab bar + delete / annotation menu items). Included by default in `@openchoreo/backstage-portal-app`. Adopters omit it to keep vanilla Backstage `<EntityLayout>` chrome — tabs and Overview layouts still work either way.
+  - `OpenChoreoAboutCard`, `ContainedCatalogGraphCard`, `EntityRelationWarning` — previously portal-internal, now shipped as React components.
+
+  **New NFS blueprints (all in `@openchoreo/backstage-plugin/alpha`):**
+
+  - 18 `EntityContentLayoutBlueprint`s — one per OC-owned kind (Component, System, Domain, managed Resource, Environment, Dataplane / Cluster, WorkflowPlane / Cluster, ObservabilityPlane / Cluster, DeploymentPipeline, Component/Resource/Project/Trait Type families, Workflow / ClusterWorkflow, ComponentWorkflow). Each layout arranges bespoke OC cards in curated grid positions, then appends any adopter-contributed or upstream-default cards at the tail so third-party plugins compose visually.
+  - 2 `EntityContextMenuItemBlueprint`s — permission-gated "Delete" and "Edit Annotations" actions. Both routes (canonical chrome + `openChoreoEntityPageOverride`) share the same presentational `DeleteEntityDialog` and `performEntityDelete` dispatch from PR #675.
+  - `group` annotation on every `EntityContentBlueprint` (definition / deployment / runtime / analysis / external) for tab-ordering via `app.pages.entity.config`.
+  - Upstream community CI plugins (`techdocs`, `jenkins`, `github-actions`, `gitlab`) registered so their annotation-gated tabs continue to appear on Component entities. The `api-docs/apis` and `techdocs` tabs are filter-tightened via app-side overrides so they only show when `providesApi`/`consumesApi` relations or `backstage.io/techdocs-ref` annotations are present (matching the pre-NFS `EntityPage.tsx` behavior).
+
+  **Every OC blueprint is scoped to the `openchoreo.io/managed=true` label.** Two new helpers in `@openchoreo/backstage-plugin-common`: `isOpenChoreoManagedEntity` and `isOpenChoreoManagedOfKind(...kinds)`. Under NFS feature discovery, blueprints auto-attach — this label prevents OC UI leaking onto adopter entities of the same kind (Component, System, Domain, or any name that collides with an OC kind like `Environment`/`Workflow`) that aren't OC-owned.
+
+  **Portal `app-config.yaml` and `app-config.production.yaml` add:**
+
+  - `app.pages.entity.config.groups` — recommended tab ordering (overview / definition / deployment / runtime / analysis / external).
+  - `app.extensions` — suppresses 20 upstream cards that duplicate OC layouts (`catalog/about`, `catalog/links`, `catalog/labels`, `catalog/depends-on-*`, `catalog/has-*`, `catalog-graph/relations`, `api-docs/*-apis`, `api-docs/providing-components`, `api-docs/consuming-components`, and 6 unconditional GitLab cards that throw when GitLab annotations are absent).
+
+  See the README's Installation section for the recommended `app.pages.entity.config` block and per-extension override examples adopters can copy selectively.
+
+- 762b22a: Complete the New Frontend System migration for the portal shell and
+  distribute scaffolder field extensions through the base plugin.
+
+  **Portal**: `convertLegacyAppRoot` and `Root.tsx` are gone. Themes, icons,
+  sidebar (`NavContentBlueprint`), provider stack, and every route now
+  ship as NFS blueprints.
+
+  **Adopter-facing additions**:
+
+  - `@openchoreo/backstage-plugin/alpha` — `execTerminalPage`, 32
+    `FormFieldBlueprint`s for OC template fields, plus new component
+    exports (`ScaffolderPreselectionProvider`, `EntityWarningStrip`,
+    `ForeignCardsSection`)
+  - `@openchoreo/backstage-plugin-openchoreo-observability/alpha` —
+    `costInsightsPage` with sidebar auto-discovery
+  - `@openchoreo/backstage-plugin-platform-engineer-core/alpha` —
+    `platformOverviewPage` with sidebar auto-discovery; `PlatformOverviewPage`
+    source moved from portal-app
+  - `@openchoreo/backstage-plugin-react` — `useQueryParams` (backwards-compat
+    re-export left in `@openchoreo/backstage-plugin`)
+
+- 36f0982: Surface the deployed OpenChoreo platform version in the Console. The backend
+  gains a `GET /platform-version` route proxying the OpenChoreo API server's
+  public `/version` endpoint; the frontend gains `getPlatformVersion()` on the
+  client and a `PlatformAboutCard` component. The stock portal shows the card
+  in Settings → General next to the stock user-settings cards.
+- d7f12e6: Restore the Portal Assistant surfaces that were dropped in the New Frontend
+  System entity-page migration.
+
+  Introduce a decoupled assistant-integration contract in
+  `@openchoreo/backstage-plugin-react` (`portalAssistantIntegrationApiRef`,
+  `usePortalAssistant`, `BuildFailureNotifierSlot`) so no plugin depends on the
+  private portal-assistant plugin. The OpenChoreo plugins consume it: the
+  component Overview layout and the Workflows (Build) page mount
+  `BuildFailureNotifierSlot`, and the deploy panel (`Environments`) falls back
+  to the contract's `renderInvestigateAction` slot when mounted propless.
+
+  The portal app registers the provider for these slots (the composition root
+  owns the portal-assistant dependency), wiring the failed-build launcher and
+  the deploy-panel "Investigate with AI" action back in. With the assistant
+  feature enabled, the failed-build prompt reappears on the Overview and Build
+  tabs and the investigate action on a pending/failed deployment. When no
+  assistant is registered every slot renders nothing.
+
+- 0c85b6b: Render trait configuration forms using `x-openchoreo-backstage-portal` schema annotations. The Add/Edit trait dialogs now fold these vendor extensions (e.g. `ui:order`, `ui:widget`, `ui:title`, `ui:placeholder`) into the RJSF uiSchema, letting trait authors control form rendering. Traits without annotations are unaffected.
+
+### Patch Changes
+
+- c2acee5: Support frameless rendering for widgets embedded in a home page card. `SummaryWidgetWrapper` gains a `disableCard` prop and `MyProjectsWidget` forwards it; `QuickActionsSection` gains a `hideTitle` prop. These let the components render body-only content when an outer card extension already provides the card frame and title, avoiding duplicated headers.
+- cc2fe12: Publish `@openchoreo/*` to the public npm registry instead of GitHub Packages. Installing the plugins no longer requires a GitHub personal access token or any registry configuration. Releases are published from CI via npm trusted publishing (OIDC), so every version from this release onward carries a signed provenance attestation.
+- 23f804a: Render `<resource:name>` entity tags in RCA reports as catalog links, instead
+  of dropping them as unknown HTML along with the resource name. Clamp resource
+  parameter values to three lines, so a long value no longer stretches every
+  card in the overview row.
+- Updated dependencies [f39a20c]
+- Updated dependencies [4c7f96c]
+- Updated dependencies [526e7ac]
+- Updated dependencies [202d582]
+- Updated dependencies [d00d48b]
+- Updated dependencies [45caff4]
+- Updated dependencies [a958b80]
+- Updated dependencies [c2acee5]
+- Updated dependencies [67ba0da]
+- Updated dependencies [497b480]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [762b22a]
+- Updated dependencies [0a7d538]
+- Updated dependencies [d7f12e6]
+  - @openchoreo/backstage-design-system@1.3.0
+  - @openchoreo/backstage-plugin-common@1.3.0
+  - @openchoreo/backstage-plugin-react@1.3.0
+  - @openchoreo/cell-diagram@1.3.0
+
+## 1.3.0-next.0
+
+### Minor Changes
+
+- 67ba0da: Add a per-row "Delete" action to the Project Contents table so a component
+  can be deleted directly from the project listing without opening the
+  component page first. The action surfaces as a per-row delete button for
+  both component and resource rows (hidden for rows already marked for
+  deletion), reuses the shared delete-confirmation dialog, and optimistically
+  marks the row for deletion until the next catalog sync drops it.
+- 2564efb: Ship the OpenChoreo frontend integration surface out of the base plugin so
+  adopters no longer copy-paste boilerplate into their `packages/app/`.
+  `@openchoreo/backstage-plugin/alpha` now exports:
+
+  - **`openChoreoAppModule`** — a `createFrontendModule({ pluginId: 'app' })`
+    that wraps the app root in `OpenChoreoQueryProvider` and overrides
+    `fetchApiRef` + `permissionApiRef` with the OpenChoreo IDP-token-aware
+    implementations. Previously each adopter had to hand-copy the
+    `OpenChoreoFetchApi` / `OpenChoreoPermissionApi` classes plus three
+    `ApiBlueprint.make(...)` factories (~150 lines) into a local
+    `customAppModule.tsx`.
+  - **`openChoreoEntityGroupsModule`** — an opt-in
+    `createFrontendModule({ pluginId: 'catalog' })` that overrides
+    `page:catalog/entity`'s `groupDefinitions` with the canonical OpenChoreo
+    tab order (Definition → Build → Deploy → Cell Diagram → …). Every OC tab
+    uses a unique `group:` key so the vanilla NFS dropdown-collapse never
+    triggers and tabs render flat. Non-OC entity pages are unaffected — the
+    six upstream default group names are retained in their vanilla relative
+    order.
+  - **`openChoreoAuthApiRef`**, **`OpenChoreoFetchApi`**,
+    **`OpenChoreoPermissionApi`** — surfaced as public exports so
+    `customAppModule.tsx` can reference them without local re-declaration.
+  - **`openchoreo:inject-user-token`** scaffolder form decorator — now
+    registered automatically as a `FormDecoratorBlueprint` extension.
+    Templates that opt in via `EXPERIMENTAL_formDecorators` in their spec get
+    the signed-in user's IDP token injected as the `OPENCHOREO_USER_TOKEN`
+    template secret with no adopter-side wiring.
+
+  Group values on OpenChoreo entity content tabs were also uniqued across the
+  three plugins (`deployment` → `deploy` / `build` / `cell-diagram` /
+  `diagram`, `runtime` → `logs` / `events` / `metrics` / `alerts` /
+  `wirelogs`, `analysis` → `traces` / `incidents` / `rca-reports` /
+  `cost-analysis`). Combined with `openChoreoEntityGroupsModule` this
+  guarantees flat tab rendering under vanilla NFS chrome.
+
+  Portal-app is unchanged for users. Internally, the plugin-owned modules
+  replace ~200 lines of previously-hand-copied wiring in
+  `packages/portal-app/src/apis/customOverrides.tsx` and
+  `packages/portal-app/src/appModule.tsx`, and the standalone
+  `openChoreoTokenDecorator.ts` file in `packages/portal-app/src/scaffolder/`
+  is deleted.
+
+- 67ba0da: Generalize the listing row delete beyond components. The new
+  `useDeleteEntityDialog` hook (replacing `useDeleteComponentDialog`) dispatches
+  deletes for every kind the OpenChoreo API supports — components, projects,
+  namespaces, resources and the platform resource kinds — sharing one dispatch
+  with the entity-page context menu. A reusable `RowDeleteButton` +
+  `usePendingDeletionOverlay` pair wires per-row delete (with an optimistic
+  "marked for deletion" badge) into the catalog "All ..." pages, the namespace
+  projects/resources cards, and extends the Project Contents row action to
+  resource rows.
+- ce31a0e: Migrate entity pages to the Backstage New Frontend System. The hand-authored `EntityPage.tsx` in `packages/portal-app` (and its supporting files `EntityLayoutWithDelete.tsx`, `OpenChoreoCatalogEntityPage.tsx`, `WorkflowsOrExternalCICard.tsx`) is gone; tabs, cards, per-kind Overview layouts, and delete / annotation context menu items now ship as NFS blueprints from the plugins. Adopters installing `@openchoreo/backstage-plugin` in their own Backstage get the same OpenChoreo tabs and Overview grids as the portal automatically — no hand-authored `EntityPage.tsx` required.
+
+  **New public exports from `@openchoreo/backstage-plugin`:**
+
+  - `openChoreoEntityPageOverride` (from `/alpha`) — opt-in FrontendModule that swaps the canonical entity-page chrome for `OpenChoreoEntityLayout` (compact header + styled tab bar + delete / annotation menu items). Included by default in `@openchoreo/backstage-portal-app`. Adopters omit it to keep vanilla Backstage `<EntityLayout>` chrome — tabs and Overview layouts still work either way.
+  - `OpenChoreoAboutCard`, `ContainedCatalogGraphCard`, `EntityRelationWarning` — previously portal-internal, now shipped as React components.
+
+  **New NFS blueprints (all in `@openchoreo/backstage-plugin/alpha`):**
+
+  - 18 `EntityContentLayoutBlueprint`s — one per OC-owned kind (Component, System, Domain, managed Resource, Environment, Dataplane / Cluster, WorkflowPlane / Cluster, ObservabilityPlane / Cluster, DeploymentPipeline, Component/Resource/Project/Trait Type families, Workflow / ClusterWorkflow, ComponentWorkflow). Each layout arranges bespoke OC cards in curated grid positions, then appends any adopter-contributed or upstream-default cards at the tail so third-party plugins compose visually.
+  - 2 `EntityContextMenuItemBlueprint`s — permission-gated "Delete" and "Edit Annotations" actions. Both routes (canonical chrome + `openChoreoEntityPageOverride`) share the same presentational `DeleteEntityDialog` and `performEntityDelete` dispatch from PR #675.
+  - `group` annotation on every `EntityContentBlueprint` (definition / deployment / runtime / analysis / external) for tab-ordering via `app.pages.entity.config`.
+  - Upstream community CI plugins (`techdocs`, `jenkins`, `github-actions`, `gitlab`) registered so their annotation-gated tabs continue to appear on Component entities. The `api-docs/apis` and `techdocs` tabs are filter-tightened via app-side overrides so they only show when `providesApi`/`consumesApi` relations or `backstage.io/techdocs-ref` annotations are present (matching the pre-NFS `EntityPage.tsx` behavior).
+
+  **Every OC blueprint is scoped to the `openchoreo.io/managed=true` label.** Two new helpers in `@openchoreo/backstage-plugin-common`: `isOpenChoreoManagedEntity` and `isOpenChoreoManagedOfKind(...kinds)`. Under NFS feature discovery, blueprints auto-attach — this label prevents OC UI leaking onto adopter entities of the same kind (Component, System, Domain, or any name that collides with an OC kind like `Environment`/`Workflow`) that aren't OC-owned.
+
+  **Portal `app-config.yaml` and `app-config.production.yaml` add:**
+
+  - `app.pages.entity.config.groups` — recommended tab ordering (overview / definition / deployment / runtime / analysis / external).
+  - `app.extensions` — suppresses 20 upstream cards that duplicate OC layouts (`catalog/about`, `catalog/links`, `catalog/labels`, `catalog/depends-on-*`, `catalog/has-*`, `catalog-graph/relations`, `api-docs/*-apis`, `api-docs/providing-components`, `api-docs/consuming-components`, and 6 unconditional GitLab cards that throw when GitLab annotations are absent).
+
+  See the README's Installation section for the recommended `app.pages.entity.config` block and per-extension override examples adopters can copy selectively.
+
+- 762b22a: Complete the New Frontend System migration for the portal shell and
+  distribute scaffolder field extensions through the base plugin.
+
+  **Portal**: `convertLegacyAppRoot` and `Root.tsx` are gone. Themes, icons,
+  sidebar (`NavContentBlueprint`), provider stack, and every route now
+  ship as NFS blueprints.
+
+  **Adopter-facing additions**:
+
+  - `@openchoreo/backstage-plugin/alpha` — `execTerminalPage`, 32
+    `FormFieldBlueprint`s for OC template fields, plus new component
+    exports (`ScaffolderPreselectionProvider`, `EntityWarningStrip`,
+    `ForeignCardsSection`)
+  - `@openchoreo/backstage-plugin-openchoreo-observability/alpha` —
+    `costInsightsPage` with sidebar auto-discovery
+  - `@openchoreo/backstage-plugin-platform-engineer-core/alpha` —
+    `platformOverviewPage` with sidebar auto-discovery; `PlatformOverviewPage`
+    source moved from portal-app
+  - `@openchoreo/backstage-plugin-react` — `useQueryParams` (backwards-compat
+    re-export left in `@openchoreo/backstage-plugin`)
+
+- 36f0982: Surface the deployed OpenChoreo platform version in the Console. The backend
+  gains a `GET /platform-version` route proxying the OpenChoreo API server's
+  public `/version` endpoint; the frontend gains `getPlatformVersion()` on the
+  client and a `PlatformAboutCard` component. The stock portal shows the card
+  in Settings → General next to the stock user-settings cards.
+- d7f12e6: Restore the Portal Assistant surfaces that were dropped in the New Frontend
+  System entity-page migration.
+
+  Introduce a decoupled assistant-integration contract in
+  `@openchoreo/backstage-plugin-react` (`portalAssistantIntegrationApiRef`,
+  `usePortalAssistant`, `BuildFailureNotifierSlot`) so no plugin depends on the
+  private portal-assistant plugin. The OpenChoreo plugins consume it: the
+  component Overview layout and the Workflows (Build) page mount
+  `BuildFailureNotifierSlot`, and the deploy panel (`Environments`) falls back
+  to the contract's `renderInvestigateAction` slot when mounted propless.
+
+  The portal app registers the provider for these slots (the composition root
+  owns the portal-assistant dependency), wiring the failed-build launcher and
+  the deploy-panel "Investigate with AI" action back in. With the assistant
+  feature enabled, the failed-build prompt reappears on the Overview and Build
+  tabs and the investigate action on a pending/failed deployment. When no
+  assistant is registered every slot renders nothing.
+
+- 0c85b6b: Render trait configuration forms using `x-openchoreo-backstage-portal` schema annotations. The Add/Edit trait dialogs now fold these vendor extensions (e.g. `ui:order`, `ui:widget`, `ui:title`, `ui:placeholder`) into the RJSF uiSchema, letting trait authors control form rendering. Traits without annotations are unaffected.
+
+### Patch Changes
+
+- c2acee5: Support frameless rendering for widgets embedded in a home page card. `SummaryWidgetWrapper` gains a `disableCard` prop and `MyProjectsWidget` forwards it; `QuickActionsSection` gains a `hideTitle` prop. These let the components render body-only content when an outer card extension already provides the card frame and title, avoiding duplicated headers.
+- cc2fe12: Publish `@openchoreo/*` to the public npm registry instead of GitHub Packages. Installing the plugins no longer requires a GitHub personal access token or any registry configuration. Releases are published from CI via npm trusted publishing (OIDC), so every version from this release onward carries a signed provenance attestation.
+- 23f804a: Render `<resource:name>` entity tags in RCA reports as catalog links, instead
+  of dropping them as unknown HTML along with the resource name. Clamp resource
+  parameter values to three lines, so a long value no longer stretches every
+  card in the overview row.
+- Updated dependencies [f39a20c]
+- Updated dependencies [4c7f96c]
+- Updated dependencies [526e7ac]
+- Updated dependencies [202d582]
+- Updated dependencies [d00d48b]
+- Updated dependencies [45caff4]
+- Updated dependencies [a958b80]
+- Updated dependencies [c2acee5]
+- Updated dependencies [67ba0da]
+- Updated dependencies [497b480]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [762b22a]
+- Updated dependencies [0a7d538]
+- Updated dependencies [d7f12e6]
+  - @openchoreo/backstage-design-system@1.3.0-next.0
+  - @openchoreo/backstage-plugin-common@1.3.0-next.0
+  - @openchoreo/backstage-plugin-react@1.3.0-next.0
+  - @openchoreo/cell-diagram@1.3.0-next.0
+
 ## 1.2.0
 
 ### Minor Changes

@@ -65,6 +65,12 @@ export const ObservabilityMetrics = lazy(() =>
   })),
 );
 
+export const ObservabilityProjectMetrics = lazy(() =>
+  import('./components/Metrics/ObservabilityProjectMetricsPage').then(m => ({
+    default: m.ObservabilityProjectMetricsPage,
+  })),
+);
+
 export const ObservabilityTraces = lazy(() =>
   import('./components/Traces/ObservabilityTracesPage').then(m => ({
     default: m.ObservabilityTracesPage,
@@ -114,6 +120,12 @@ export const ObservabilityProjectIncidents = lazy(() =>
 export const ObservabilityCostAnalysis = lazy(() =>
   import('./components/CostAnalysis').then(m => ({
     default: m.CostAnalysisPage,
+  })),
+);
+
+export const ObservabilityAuditLogs = lazy(() =>
+  import('./components/AuditLogs/AuditLogsPage').then(m => ({
+    default: m.AuditLogsPage,
   })),
 );
 

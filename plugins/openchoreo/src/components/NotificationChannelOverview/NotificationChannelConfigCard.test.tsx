@@ -6,6 +6,20 @@ jest.mock('@backstage/plugin-catalog-react', () => ({
   useEntity: () => ({ entity: mockEntity }),
 }));
 
+jest.mock('@backstage/core-plugin-api', () => ({
+  useApi: () => ({}),
+}));
+
+jest.mock('../../api/OpenChoreoClientApi', () => ({
+  openChoreoClientApiRef: { id: 'openchoreo-client' },
+}));
+
+// Conditions the live channel reports; the card reads them through useOpenChoreoQuery.
+let mockConditions: any[] | undefined;
+jest.mock('@openchoreo/backstage-plugin-react', () => ({
+  useOpenChoreoQuery: () => ({ data: mockConditions }),
+}));
+
 jest.mock('@backstage/core-components', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
     <a href={to}>{children}</a>
@@ -27,6 +41,10 @@ const baseEntity = (spec: Record<string, unknown>, namespace = 'my-ns') => ({
 });
 
 describe('NotificationChannelConfigCard', () => {
+  beforeEach(() => {
+    mockConditions = undefined;
+  });
+
   it('renders email config details', () => {
     mockEntity = baseEntity({
       environment: 'dev',
@@ -35,6 +53,7 @@ describe('NotificationChannelConfigCard', () => {
         from: 'alerts@example.com',
         to: ['team@example.com', 'oncall@example.com'],
         smtp: { host: 'smtp.example.com', port: 587 },
+        template: { contentType: 'text/html' },
       },
     });
 
@@ -46,6 +65,59 @@ describe('NotificationChannelConfigCard', () => {
       screen.getByText('team@example.com, oncall@example.com'),
     ).toBeInTheDocument();
     expect(screen.getByText('smtp.example.com:587')).toBeInTheDocument();
+    expect(screen.getByText('text/html')).toBeInTheDocument();
+  });
+
+  it('renders the sender display name with the from address', () => {
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'email',
+      emailConfig: {
+        from: 'alerts@example.com',
+        fromName: 'Example Alerts',
+        to: ['team@example.com'],
+        smtp: { host: 'smtp.example.com', port: 587 },
+      },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(
+      screen.getByText('Example Alerts <alerts@example.com>'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the from address when the sender display name is blank', () => {
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'email',
+      emailConfig: {
+        from: 'alerts@example.com',
+        fromName: '   ',
+        to: ['team@example.com'],
+        smtp: { host: 'smtp.example.com', port: 587 },
+      },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(screen.getByText('alerts@example.com')).toBeInTheDocument();
+  });
+
+  it('defaults the content type to text/plain when the template omits it', () => {
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'email',
+      emailConfig: {
+        from: 'alerts@example.com',
+        to: ['team@example.com'],
+        smtp: { host: 'smtp.example.com', port: 587 },
+      },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(screen.getByText('text/plain')).toBeInTheDocument();
   });
 
   it('renders webhook config details with inline and secret headers', () => {
@@ -133,5 +205,97 @@ describe('NotificationChannelConfigCard', () => {
 
     const { container } = render(<NotificationChannelConfigCard />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows the secret references of the SMTP credentials and headers with their keys', () => {
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'email',
+      emailConfig: {
+        from: 'a@b.com',
+        to: ['c@d.com'],
+        smtp: {
+          host: 'smtp.example.com',
+          port: 587,
+          auth: {
+            username: { secretKeyRef: { name: 'smtp-auth', key: 'username' } },
+            password: { secretKeyRef: { name: 'smtp-auth', key: 'password' } },
+          },
+        },
+      },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(
+      screen.getByText('secret: smtp-auth / username'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('secret: smtp-auth / password'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the status and no banners for a ready channel', () => {
+    mockConditions = [
+      { type: 'Ready', status: 'True', reason: 'Reconciled' },
+      { type: 'SecretsReady', status: 'True', reason: 'ExternalSecretSynced' },
+    ];
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'webhook',
+      webhookConfig: { url: 'https://hooks.example.com' },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(
+      screen.getByText('Ready (ExternalSecretSynced)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('warns when the channel still copies values from Kubernetes Secrets', () => {
+    mockConditions = [
+      { type: 'Ready', status: 'True', reason: 'Reconciled' },
+      {
+        type: 'SecretsReady',
+        status: 'True',
+        reason: 'DeprecatedKubernetesSecret',
+      },
+    ];
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'webhook',
+      webhookConfig: { url: 'https://hooks.example.com' },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'reads its secret values from Kubernetes Secrets, which is deprecated',
+    );
+  });
+
+  it('shows why a channel is not ready', () => {
+    mockConditions = [
+      {
+        type: 'Ready',
+        status: 'False',
+        reason: 'RemoteKeyNotAllowed',
+        message: 'SecretReference "creds" points at remote key "platform-key"',
+      },
+    ];
+    mockEntity = baseEntity({
+      environment: 'dev',
+      type: 'webhook',
+      webhookConfig: { url: 'https://hooks.example.com' },
+    });
+
+    render(<NotificationChannelConfigCard />);
+
+    expect(screen.getByText('Not Ready')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'RemoteKeyNotAllowed: SecretReference "creds" points at remote key "platform-key"',
+    );
   });
 });

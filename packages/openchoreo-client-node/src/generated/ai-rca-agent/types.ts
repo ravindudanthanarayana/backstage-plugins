@@ -99,6 +99,8 @@ export interface components {
       project: string;
       component: string;
       environment: string;
+      /** @description Release line the alert rule belongs to, for components with release lines. */
+      release_line?: string | null;
       alert: components['schemas']['AlertContext'];
       meta?: {
         [key: string]: unknown;
@@ -249,6 +251,7 @@ export interface components {
       source_metric?: string | null;
       condition: components['schemas']['ReportAlertCondition'];
       component: string;
+      release_line?: string | null;
       project: string;
       environment: string;
     };
@@ -375,6 +378,12 @@ export interface components {
       change?: components['schemas']['ResourceChange'];
     };
     ResourceChange: {
+      /**
+       * @description Which binding kind to modify. 'ReleaseBinding' for a Component, 'ResourceReleaseBinding' for a Resource (e.g. a managed Postgres). ResourceReleaseBinding targets support only `fields` (paths under /spec/resourceTypeEnvironmentConfigs) — not `env` or `files`. Defaults to 'ReleaseBinding' for older reports that predate this field.
+       * @default ReleaseBinding
+       * @enum {string}
+       */
+      target_kind: 'ReleaseBinding' | 'ResourceReleaseBinding';
       release_binding: string;
       /** @default [] */
       env: components['schemas']['EnvVarChange'][];
@@ -610,6 +619,15 @@ export interface operations {
           'application/json': components['schemas']['ErrorResponse'];
         };
       };
+      /** @description Forbidden - insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
       /** @description Report not found */
       404: {
         headers: {
@@ -659,6 +677,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description Forbidden - insufficient permissions */
+      403: {
         headers: {
           [name: string]: unknown;
         };

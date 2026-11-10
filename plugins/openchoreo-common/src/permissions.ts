@@ -1037,6 +1037,20 @@ export const openchoreoLogsViewPermission = createPermission({
 });
 
 /**
+ * Permission to view platform (system component) logs.
+ *
+ * Deliberately NOT resource-based. Platform logs are not owned by any project or
+ * component, and because collection is not gated this reads every log the
+ * observability plane holds - user workload logs included - with no ownership check.
+ * It maps to the cluster-scoped `platformlogs:view` action, which only a
+ * cluster-scoped role binding can satisfy.
+ */
+export const openchoreoPlatformLogsViewPermission = createPermission({
+  name: 'openchoreo.platformlogs.view',
+  attributes: { action: 'read' },
+});
+
+/**
  * Permission to view Kubernetes events for a component.
  * Resource-based: requires the specific component context.
  */
@@ -1138,6 +1152,19 @@ export const openchoreoIncidentsViewPermission = createPermission({
 });
 
 /**
+ * Permission to read the audit trail.
+ *
+ * Not resource-based: the trail spans every namespace, so the observer
+ * evaluates `auditlogs:view` at cluster scope. The tenancy filters a query
+ * carries narrow the result set and never widen authorization — working in a
+ * project does not confer the right to read its audit trail.
+ */
+export const openchoreoAuditLogsViewPermission = createPermission({
+  name: 'openchoreo.auditlogs.view',
+  attributes: { action: 'read' },
+});
+
+/**
  * All OpenChoreo permissions exported as an array.
  * Useful for registering all permissions with the permission framework.
  */
@@ -1191,6 +1218,7 @@ export const openchoreoPermissions = [
   openchoreoClusterRoleMappingDeletePermission,
   openchoreoExecPermission,
   openchoreoLogsViewPermission,
+  openchoreoPlatformLogsViewPermission,
   openchoreoEventsViewPermission,
   openchoreoMetricsViewPermission,
   openchoreoTracesViewPermission,
@@ -1201,6 +1229,7 @@ export const openchoreoPermissions = [
   openchoreoAlertsViewPermission,
   openchoreoWirelogsViewPermission,
   openchoreoIncidentsViewPermission,
+  openchoreoAuditLogsViewPermission,
   openchoreoTraitCreatePermission,
   openchoreoComponentTypeCreatePermission,
   openchoreoResourceTypeCreatePermission,
@@ -1323,6 +1352,8 @@ export const OPENCHOREO_PERMISSION_TO_ACTION: Record<string, string> = {
   'openchoreo.clusterrolemapping.delete': 'clusterauthzrolebinding:delete',
   'openchoreo.exec': 'component:exec',
   'openchoreo.logs.view': 'logs:view',
+  'openchoreo.platformlogs.view': 'platformlogs:view',
+  'openchoreo.auditlogs.view': 'auditlogs:view',
   'openchoreo.events.view': 'events:view',
   'openchoreo.alerts.view': 'alerts:view',
   'openchoreo.wirelogs.view': 'wirelogs:view',
@@ -1420,6 +1451,7 @@ export const CATALOG_PERMISSION_TO_ACTION: Record<string, string> = {
  */
 export const OPENCHOREO_MANAGED_ENTITY_KINDS = [
   'Component',
+  'ReleaseLine',
   'Resource',
   'System',
   'Domain',
@@ -1463,6 +1495,12 @@ export const CATALOG_KIND_TO_ACTION: Record<string, Record<string, string>> = {
   component: {
     'catalog.entity.read': 'component:view',
     'catalog.entity.delete': 'component:delete',
+    'catalog.entity.refresh': 'component:update',
+  },
+  // Release lines are read and changed through their component.
+  releaseline: {
+    'catalog.entity.read': 'component:view',
+    'catalog.entity.delete': 'component:update',
     'catalog.entity.refresh': 'component:update',
   },
   resource: {

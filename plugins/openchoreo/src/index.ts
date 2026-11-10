@@ -1,5 +1,8 @@
 export { choreoPlugin } from './plugin';
 export { openChoreoClientApiRef } from './api/OpenChoreoClientApi';
+export { openChoreoAuthApiRef } from './api/authRefs';
+export { OpenChoreoFetchApi } from './api/OpenChoreoFetchApi';
+export { OpenChoreoPermissionApi } from './api/OpenChoreoPermissionApi';
 // Exported so external Backstage hosts can register the API factory in
 // their packages/app/src/apis.ts. Without this, hosts that do not include
 // the plugin in their auto-discovered routes tree get a NotImplementedError
@@ -98,5 +101,17 @@ export { TraitTypeOverviewCard } from './components/TraitTypeOverview';
 export { WorkflowOverviewCard } from './components/WorkflowOverview';
 export { ComponentWorkflowOverviewCard } from './components/ComponentWorkflowOverview';
 export { ResourceDefinitionTab } from './components/ResourceDefinition';
+export { OpenChoreoAboutCard } from './components/OpenChoreoAboutCard';
+export { ContainedCatalogGraphCard } from './components/ContainedCatalogGraphCard';
+export { EntityWarningStrip } from './extensions/entityLayouts/EntityWarningStrip';
+export {
+  ScaffolderPreselectionProvider,
+  useScaffolderPreselection,
+} from './scaffolder/ScaffolderPreselectionContext';
+export {
+  ForeignCardsSection,
+  selectForeignCards,
+} from './extensions/entityLayouts/foreignCards';
+export { EntityRelationWarning } from './components/EntityRelationWarning';
 export { useQueryParams } from './hooks/useQueryParams';
 export { ExecTerminalWindowPage } from './components/Terminal';

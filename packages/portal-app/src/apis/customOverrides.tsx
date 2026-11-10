@@ -9,7 +9,18 @@
 
 import catalogGraphPluginAlphaBase from '@backstage/plugin-catalog-graph/alpha';
 import catalogPluginAlphaBase from '@backstage/plugin-catalog/alpha';
+import catalogImportPluginAlphaBase from '@backstage/plugin-catalog-import/alpha';
+import apiDocsPluginAlphaBase from '@backstage/plugin-api-docs/alpha';
+import techdocsPluginAlphaBase from '@backstage/plugin-techdocs/alpha';
 import scaffolderPluginAlphaBase from '@backstage/plugin-scaffolder/alpha';
+import searchPluginAlphaBase from '@backstage/plugin-search/alpha';
+import userSettingsPluginAlphaBase from '@backstage/plugin-user-settings/alpha';
+import { SearchContextProvider } from '@backstage/plugin-search-react';
+import { RequirePermission } from '@backstage/plugin-permission-react';
+import { catalogEntityCreatePermission } from '@backstage/plugin-catalog-common/alpha';
+import { CustomGraphNode } from '@openchoreo/backstage-plugin-react';
+import type { Entity } from '@backstage/catalog-model';
+import { isTechDocsAvailable } from '@backstage/plugin-techdocs';
 import { createFrontendModule } from '@backstage/frontend-plugin-api';
 import { createTranslationMessages } from '@backstage/frontend-plugin-api';
 import {
@@ -17,8 +28,9 @@ import {
   SwappableComponentBlueprint,
   TranslationBlueprint,
 } from '@backstage/plugin-app-react';
-import { Progress } from '@backstage/frontend-plugin-api';
+import { PageLayout, Progress } from '@backstage/frontend-plugin-api';
 import { PageLoader } from '@openchoreo/backstage-design-system';
+import { OpenChoreoPageLayout } from '../components/PageLayout/OpenChoreoPageLayout';
 import { catalogImportTranslationRef } from '@backstage/plugin-catalog-import/alpha';
 import {
   catalogGraphApiRef,
@@ -42,11 +54,6 @@ import {
 import { CatalogClient } from '@backstage/catalog-client';
 import { CachingCatalogApi } from '@openchoreo/backstage-plugin-react';
 import {
-  formDecoratorsApiRef,
-  DefaultScaffolderFormDecoratorsApi,
-} from '@backstage/plugin-scaffolder/alpha';
-import { FormDecoratorBlueprint } from '@backstage/plugin-scaffolder-react/alpha';
-import {
   RELATION_DEPLOYS_TO,
   RELATION_DEPLOYED_BY,
   RELATION_USES_PIPELINE,
@@ -63,9 +70,6 @@ import {
   RELATION_BUILDS,
 } from '@openchoreo/backstage-plugin-common';
 import { KIND_ICONS } from '../kindIcons';
-import { openChoreoTokenDecorator } from '../scaffolder/openChoreoTokenDecorator';
-import { LogRowActionBlueprint } from '@openchoreo/backstage-plugin-openchoreo-observability/alpha';
-import { InvestigateLogButton } from '@openchoreo/backstage-plugin-openchoreo-portal-assistant';
 
 /**
  * Override `catalog-graph`'s default `api:catalog-graph` to include the
@@ -76,6 +80,15 @@ import { InvestigateLogButton } from '@openchoreo/backstage-plugin-openchoreo-po
 export const catalogGraphPluginAlpha =
   catalogGraphPluginAlphaBase.withOverrides({
     extensions: [
+      // Override `page:catalog-graph` to pass renderNode={CustomGraphNode}.
+      catalogGraphPluginAlphaBase.getExtension('page:catalog-graph').override({
+        params: {
+          loader: () =>
+            import('@backstage/plugin-catalog-graph').then(m => (
+              <m.CatalogGraphPage renderNode={CustomGraphNode} />
+            )),
+        },
+      }),
       catalogGraphPluginAlphaBase.getExtension('api:catalog-graph').override({
         params: defineParams =>
           defineParams({
@@ -160,21 +173,12 @@ export function createCachingCatalogApi(deps: {
  * reorder, upstream's NFS extension wins by default — so we override its
  * loader explicitly.
  *
- * Finally, overrides `page:catalog/entity` so the entity page rides through
- * our `OpenChoreoCatalogEntityPage` (which sets up `AsyncEntityProvider` +
- * `EntityLayoutWithDelete` wrapping `OpenChoreoEntityLayout` with the
- * dropdown-driven `CompactEntityHeader` and styled tab bar). The hand-
- * authored per-kind layouts in `entityPage` (Overview Grid, custom
- * EntityCatalogGraphCard, FailedBuildSnackbar, etc.) are rendered as
- * `<EntityLayout.Route>` children — `OpenChoreoEntityLayout` accepts the
- * same data key, so the legacy JSX slots in unchanged.
- *
- * NFS-contributed `EntityContentBlueprint`s (in `inputs.contents`) are
- * NOT mounted here because every tab the portal needs is already declared
- * by `entityPage`. If a future third-party plugin contributes a tab via
- * `EntityContentBlueprint`, switch this loader to a
- * `factory(originalFactory, { inputs })` form and merge `inputs.contents`
- * deduped by path.
+ * The `page:catalog/entity` chrome override that mounts `OpenChoreoEntityLayout`
+ * lives in `@openchoreo/backstage-plugin/alpha` as `openChoreoEntityPageOverride`
+ * and is wired into `portalFeatures` in `../alpha`. Everything about the
+ * OC entity-page chrome — compact header, styled tab bar, delete / annotation
+ * context-menu extras, existence-check empty state — ships from the plugin so
+ * external adopters can adopt the same look with one import.
  */
 export const catalogPluginAlpha = catalogPluginAlphaBase.withOverrides({
   extensions: [
@@ -225,21 +229,91 @@ export const catalogPluginAlpha = catalogPluginAlphaBase.withOverrides({
               }),
           }),
       }),
-    catalogPluginAlphaBase.getExtension('page:catalog/entity').override({
+  ],
+});
+
+/**
+ * True when the component entity provides or consumes at least one API.
+ * Ports the legacy `hasApis` predicate that the pre-NFS `EntityPage.tsx`
+ * used to gate the `/apis` tab. Upstream `apiDocsPluginAlpha` only filters by
+ * `kind:component` — every component would otherwise show an empty APIs tab.
+ */
+function hasApis(entity: Entity): boolean {
+  if (entity.kind.toLowerCase() !== 'component') return false;
+  return (
+    entity.relations?.some(
+      r => r.type === 'providesApi' || r.type === 'consumesApi',
+    ) ?? false
+  );
+}
+
+/**
+ * Override upstream's `entity-content:api-docs/apis` (the "APIs" component
+ * tab) to hide the tab unless the component actually provides or consumes
+ * an API. Upstream's default `filter: { kind: 'component' }` shows the tab
+ * on every component regardless of whether it has APIs; the portal has
+ * always hidden it via `hasApis(entity)` in the legacy `EntityPage.tsx`.
+ */
+export const apiDocsPluginAlpha = apiDocsPluginAlphaBase.withOverrides({
+  extensions: [
+    apiDocsPluginAlphaBase
+      .getExtension('entity-content:api-docs/apis')
+      .override({
+        params: { filter: hasApis },
+      }),
+    // /api-docs → host's CustomApiExplorerPage instead of upstream's default.
+    apiDocsPluginAlphaBase.getExtension('page:api-docs').override({
       params: {
-        loader: async () => {
-          const [{ OpenChoreoCatalogEntityPage }, { entityPage }] =
-            await Promise.all([
-              import('../components/catalog/OpenChoreoCatalogEntityPage'),
-              import('../components/catalog/EntityPage'),
-            ]);
-          return (
-            <OpenChoreoCatalogEntityPage>
-              {entityPage}
-            </OpenChoreoCatalogEntityPage>
-          );
-        },
+        // CustomApiExplorerPage mounts its own <PageWithHeader title="APIs">.
+        noHeader: true,
+        loader: () =>
+          import('../components/catalog/CustomApiExplorerPage').then(m => (
+            <m.CustomApiExplorerPage />
+          )),
       },
+    }),
+    // Portal-only: raw OpenAPI YAML viewer instead of upstream's ApiDefinitionCard.
+    apiDocsPluginAlphaBase
+      .getExtension('entity-content:api-docs/definition')
+      .override({
+        params: {
+          loader: async () =>
+            import('../components/apiOverview/ApiOpenApiDefinitionTab').then(
+              m => <m.ApiOpenApiDefinitionTab />,
+            ),
+        },
+      }),
+  ],
+});
+
+// /catalog-import → host's CustomCatalogImportPage, gated by permission.
+export const catalogImportPluginAlpha =
+  catalogImportPluginAlphaBase.withOverrides({
+    extensions: [
+      catalogImportPluginAlphaBase
+        .getExtension('page:catalog-import')
+        .override({
+          params: {
+            // CustomCatalogImportPage mounts its own <Page><Header>.
+            noHeader: true,
+            loader: () =>
+              import('../components/catalog/CustomCatalogImportPage').then(
+                m => (
+                  <RequirePermission permission={catalogEntityCreatePermission}>
+                    <m.CustomCatalogImportPage />
+                  </RequirePermission>
+                ),
+              ),
+          },
+        }),
+    ],
+  });
+
+// Hide TechDocs entity tab unless `backstage.io/techdocs-ref` is set.
+export const techdocsPluginAlpha = techdocsPluginAlphaBase.withOverrides({
+  extensions: [
+    techdocsPluginAlphaBase.getExtension('entity-content:techdocs').override({
+      params: { filter: isTechDocsAvailable },
     }),
   ],
 });
@@ -290,20 +364,6 @@ export const customAppModule = createFrontendModule({
         }),
       },
     }),
-    // Host-injected per-row action renderer for the observability
-    // runtime-logs tables. Wires the portal-assistant's
-    // InvestigateLogButton into ObservabilityRuntimeLogs /
-    // ObservabilityProjectRuntimeLogs without coupling the
-    // observability plugin to portal-assistant. Mirrors upstream's
-    // FormDecoratorBlueprint registration pattern.
-    LogRowActionBlueprint.make({
-      name: 'investigate-log',
-      params: {
-        renderer: (log, getLogsSnapshot) => (
-          <InvestigateLogButton log={log} getLogsSnapshot={getLogsSnapshot} />
-        ),
-      },
-    }),
     // Swap Backstage's built-in `<Progress />` bar (the Suspense fallback
     // `ExtensionBoundary` renders while a lazy page/extension chunk loads) for
     // our centered PageLoader, so route transitions match the rest of the app.
@@ -315,8 +375,58 @@ export const customAppModule = createFrontendModule({
           loader: () => () => <PageLoader />,
         }),
     }),
+    // Swap the page chrome Backstage wraps routable pages in. Upstream renders a
+    // `@backstage/ui` toolbar; every OpenChoreo page sets `noHeader: true` and
+    // mounts its own MUI `<Page><Header>`, so the two only ever met on the Platform
+    // section, whose tabs come from Backstage's sub-page mechanism and therefore
+    // get their header from here. `OpenChoreoPageLayout` gives a tabbed page the
+    // same purple header the rest of the portal uses and leaves every other page
+    // exactly as upstream had it.
+    SwappableComponentBlueprint.make({
+      name: 'page-layout',
+      params: defineParams =>
+        defineParams({
+          component: PageLayout,
+          loader: () => OpenChoreoPageLayout,
+        }),
+    }),
   ],
 });
+
+// /search → host's SearchPage (software-catalog only, kind dropdown filter).
+export const searchPluginAlpha = searchPluginAlphaBase.withOverrides({
+  extensions: [
+    searchPluginAlphaBase.getExtension('page:search').override({
+      params: {
+        noHeader: true,
+        loader: () =>
+          import('../components/search/SearchPage').then(m => (
+            <SearchContextProvider>{m.searchPage}</SearchContextProvider>
+          )),
+      },
+    }),
+  ],
+});
+
+// /settings/general → upstream General tab plus OpenChoreo's PlatformAboutCard
+// as a fourth grid card. Access Control / Secrets tabs come from the base
+// plugin's SubPageBlueprints; Auth Providers / Feature Flags are hidden via
+// `app.extensions` in app-config.yaml.
+export const userSettingsPluginAlpha =
+  userSettingsPluginAlphaBase.withOverrides({
+    extensions: [
+      userSettingsPluginAlphaBase
+        .getExtension('sub-page:user-settings/general')
+        .override({
+          params: {
+            loader: () =>
+              import('../components/settings/OpenChoreoGeneralSettings').then(
+                m => <m.OpenChoreoGeneralSettings />,
+              ),
+          },
+        }),
+    ],
+  });
 
 export const scaffolderPluginAlpha = scaffolderPluginAlphaBase.withOverrides({
   extensions: [
@@ -339,31 +449,9 @@ export const scaffolderPluginAlpha = scaffolderPluginAlphaBase.withOverrides({
           ),
       },
     }),
-    // Inject the OpenChoreo IDP-token decorator alongside any other
-    // FormDecoratorBlueprint extensions plugins may contribute. The
-    // earlier shape (`params: defineParams => defineParams({ factory: () => create({decorators: [openChoreoTokenDecorator]}) })`)
-    // discarded `inputs.formDecorators`, silently dropping every other
-    // plugin's decorator. Using `factory(originalFactory, { inputs })`
-    // preserves the upstream accumulation and then concats ours.
-    scaffolderPluginAlphaBase
-      .getExtension('api:scaffolder/form-decorators')
-      .override({
-        factory(originalFactory, { inputs }) {
-          const contributed = inputs.formDecorators.map(e =>
-            e.get(FormDecoratorBlueprint.dataRefs.formDecoratorLoader),
-          );
-          return originalFactory({
-            params: defineParams =>
-              defineParams({
-                api: formDecoratorsApiRef,
-                deps: {},
-                factory: () =>
-                  DefaultScaffolderFormDecoratorsApi.create({
-                    decorators: [openChoreoTokenDecorator, ...contributed],
-                  }),
-              }),
-          });
-        },
-      }),
+    // (The OpenChoreo IDP-token form decorator is now shipped by
+    // `@openchoreo/backstage-plugin`'s alpha via `FormDecoratorBlueprint`.
+    // Portal-app gets it through the normal plugin channel — no override
+    // needed here. See `plugins/openchoreo/src/scaffolder/openChoreoTokenDecorator.ts`.)
   ],
 });

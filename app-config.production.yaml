@@ -10,6 +10,102 @@ app:
   # For local k3d: http://openchoreo.localhost (set via https://github.com/openchoreo/openchoreo install/dev/openchoreo-values.yaml)
   # For production: external ingress URL (set via https://github.com/openchoreo/openchoreo install/helm/openchoreo/values.yaml backstage.baseUrl)
   baseUrl: ${BACKSTAGE_BASE_URL}
+  # Frontend feature discovery. Must be set here as well as in app-config.yaml
+  # — this file is the whole config at runtime (the image copies it over
+  # app-config.yaml), and app-backend injects it into the served bundle, where
+  # `discoverAvailableFeatures` re-reads `app.packages`. Under Rspack the
+  # build-time config is not inlined, so there is no fallback: unset here and
+  # the portal renders empty, with no error and no `features` array in App.tsx
+  # to fall back on. See the longer note in app-config.yaml.
+  packages: all
+  # Tab groups + order for the canonical entity page.
+  pages:
+    entity:
+      config:
+        defaultContentOrder: natural
+        groups:
+          - overview: { title: Overview }
+          - definition: { title: Definition }
+          - deployment: { title: Deployment, contentOrder: natural }
+          - runtime: { title: Runtime, contentOrder: natural }
+          - analysis: { title: Analysis, contentOrder: natural }
+          - external: { title: External }
+  # Suppress upstream cards that duplicate OC layouts + default themes so
+  # our openchoreo-* themes win the theme picker.
+  extensions:
+    # Tab order of the Platform section. Extensions named here are ordered
+    # ahead of the rest, in this order, so Overview stays the first tab —
+    # which is also where `/platform-overview` redirects to. Without this
+    # the order would depend on the `portalFeatures` order in the shell's
+    # feature loader.
+    - sub-page:platform-engineer-core/overview
+    - sub-page:openchoreo-observability/platform-logs
+    # Serve the composable home page at `/` and trim built-in home widgets.
+    - page:home:
+        config:
+          path: /
+    - home-page-widget:home/toolkit: false
+    - home-page-widget:home/random-joke: false
+    - home-page-widget:home/most-visited: false
+    - home-page-widget:home/recently-visited: false
+    - home-page-widget:home/world-clock: false
+    - theme:app/light: false
+    - theme:app/dark: false
+    # `page:kubernetes` needs an entity context (throws standalone); we
+    # want only the entity-page tab from the kubernetes plugin.
+    - page:kubernetes: false
+    # Hide upstream /settings tabs we don't want; leaves General +
+    # OpenChoreo's Access Control / Secrets sub-pages.
+    - sub-page:user-settings/auth-providers: false
+    - sub-page:user-settings/feature-flags: false
+    - entity-card:catalog/about: false
+    - entity-card:catalog/links: false
+    - entity-card:catalog/labels: false
+    - entity-card:catalog/depends-on-components: false
+    - entity-card:catalog/depends-on-resources: false
+    - entity-card:catalog/has-subcomponents: false
+    - entity-card:catalog/has-components: false
+    - entity-card:catalog/has-resources: false
+    - entity-card:catalog-graph/relations: false
+    - entity-card:api-docs/provided-apis: false
+    - entity-card:api-docs/consumed-apis: false
+    - entity-card:api-docs/has-apis: false
+    # ApiDefinitionCard lives on the Definition tab; hide the standalone.
+    - entity-card:api-docs/definition: false
+    # Providers/Consumers rendered directly by ApiOverviewLayout.
+    - entity-card:api-docs/providing-components: false
+    - entity-card:api-docs/consuming-components: false
+    # GitLab cards throw when GitLab annotations are absent.
+    - entity-card:gitlab/readme: false
+    - entity-card:gitlab/coverage: false
+    - entity-card:gitlab/releases: false
+    - entity-card:gitlab/merge-requests-stats: false
+    - entity-card:gitlab/people: false
+    - entity-card:gitlab/languages: false
+    # tech-insights-maturity is installed only for its API; the
+    # tech-insights-scorecards page and entity tab replace its own views.
+    - page:tech-insights-maturity: false
+    - entity-content:tech-insights-maturity/maturity: false
+    - entity-content:tech-insights-maturity/summary: false
+    - entity-card:tech-insights-maturity/maturity-summary: false
+    # Scores are on the Scorecards tab, not the Overview tab.
+    - entity-card:tech-insights-scorecards/summary: false
+    - entity-content:tech-insights-scorecards:
+        config:
+          group: scorecards
+          # The plugin's default kinds plus the OpenChoreo kinds that
+          # collectors report facts for.
+          filter:
+            kind:
+              $in:
+                - Component
+                - API
+                - Resource
+                - System
+                - Domain
+                - Group
+                - ClusterComponentType
+                - ComponentType
 
 backend:
   # Used for enabling authentication, secret is shared by all backend plugins
@@ -74,6 +170,24 @@ techdocs:
     runIn: 'docker' # Alternatives - 'local'
   publisher:
     type: 'local' # Alternatives - 'googleGcs' or 'awsS3'. Read documentation for using alternatives.
+
+techInsights:
+  scorecards:
+    # The Tech Insights backend, fact collectors and checks, and the
+    # Scorecards page, sidebar item and entity tab. The plugin is on when this
+    # is unset, so the default keeps OpenChoreo opt-in.
+    # Environment variable: OPENCHOREO_FEATURES_SCORECARDS_ENABLED
+    enabled: ${OPENCHOREO_FEATURES_SCORECARDS_ENABLED:-false}
+    # The scorecards views use OpenChoreo's names for these catalog kinds,
+    # and for what checks run against in text that covers several kinds.
+    kindLabels:
+      System: Project
+      Domain: Namespace
+    entityLabel:
+      singular: resource
+      plural: resources
+    # Suggested in the check editor, which also accepts new ones.
+    categories: [Security, Reliability, Documentation]
 
 auth:
   providers:
@@ -196,6 +310,7 @@ openchoreo:
   # only sync mechanism so you may want a much smaller frequency.
   # Environment variable: OPENCHOREO_CATALOG_SYNC_FREQUENCY (seconds)
 
+  # portal-template:strip-start
   # Upstream URL the openchoreo-portal-assistant-backend plugin forwards
   # to (Portal Assistant). Env-var-gated: when OPENCHOREO_PORTAL_ASSISTANT_URL
   # is unset, Backstage substitutes the placeholder as undefined and the
@@ -206,6 +321,7 @@ openchoreo:
   # service is deployed.
   # Example: OPENCHOREO_PORTAL_ASSISTANT_URL=http://portal-assistant.openchoreo-control-plane.svc.cluster.local:8080
   portalAssistantUrl: ${OPENCHOREO_PORTAL_ASSISTANT_URL}
+  # portal-template:strip-end
 
   schedule:
     frequency: ${OPENCHOREO_CATALOG_SYNC_FREQUENCY}
@@ -229,7 +345,7 @@ openchoreo:
       streamTimeoutSeconds: ${OPENCHOREO_OBSERVABILITY_WIRELOGS_STREAM_TIMEOUT_SECONDS}
 
   # Feature flags for enabling/disabling OpenChoreo functionality
-  # Environment variables: OPENCHOREO_FEATURES_WORKFLOWS_ENABLED, OPENCHOREO_FEATURES_OBSERVABILITY_ENABLED, OPENCHOREO_FEATURES_AUTH_ENABLED, OPENCHOREO_FEATURES_AUTHZ_ENABLED, OPENCHOREO_FEATURES_ASSISTANT_ENABLED
+  # Environment variables: OPENCHOREO_FEATURES_WORKFLOWS_ENABLED, OPENCHOREO_FEATURES_OBSERVABILITY_ENABLED, OPENCHOREO_FEATURES_AUTH_ENABLED, OPENCHOREO_FEATURES_AUTHZ_ENABLED, OPENCHOREO_FEATURES_ASSISTANT_ENABLED, OPENCHOREO_FEATURES_COST_INSIGHTS_ENABLED
   features:
     # Workflow plane / Workflows functionality
     # When disabled, hides Workflows tab and WorkflowsOverviewCard from entity pages
@@ -250,14 +366,25 @@ openchoreo:
     authz:
       enabled: ${OPENCHOREO_FEATURES_AUTHZ_ENABLED}
     # OpenChoreo Assistant chat agent (FAB, drawer, contextual launchers)
-    # Opt-in: defaults to false. Requires the perch-agent service and an
+    # Opt-in: defaults to false. Requires the portal-assistant service and an
     # LLM API key Secret to be deployed.
     assistant:
       enabled: ${OPENCHOREO_FEATURES_ASSISTANT_ENABLED}
+    # Delivery Insights (DORA metrics) page
+    # Opt-in: defaults to false. Feature preview, and separate from the Observer
+    # flag that collects the data (observer.deliveryInsights.enabled on the
+    # observability plane) -- both are needed for the page to show anything.
+    # When disabled, hides the Delivery Insights sidebar item.
+    deliveryInsights:
+      enabled: ${OPENCHOREO_FEATURES_DELIVERY_INSIGHTS_ENABLED}
     # Secret Management configuration
     # When disabled, hides the Secrets settings tab and disables secret APIs
     secretManagement:
       enabled: ${OPENCHOREO_FEATURES_SECRET_MANAGEMENT_ENABLED}
+    # Cost insights shown in summary cards in catalog overview pages and the insights
+    # tab in the cost insights page
+    costInsights:
+      enabled: ${OPENCHOREO_FEATURES_COST_INSIGHTS_ENABLED}
 
 thunder:
   # Environment variables are injected by Helm chart (see https://github.com/openchoreo/openchoreo install/helm/openchoreo/templates/backstage/deployment.yaml)

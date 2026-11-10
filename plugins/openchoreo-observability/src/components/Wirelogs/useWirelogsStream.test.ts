@@ -14,11 +14,8 @@ if (typeof (globalThis as any).TextDecoder === 'undefined') {
 }
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import {
-  discoveryApiRef,
-  fetchApiRef,
-  useApi,
-} from '@backstage/core-plugin-api';
+import { discoveryApiRef, useApi } from '@backstage/core-plugin-api';
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import { useWirelogsStream } from './useWirelogsStream';
 
 jest.mock('@backstage/core-plugin-api', () => {
@@ -69,7 +66,7 @@ function makeApis() {
   const fetch = jest.fn();
   (useApi as jest.Mock).mockImplementation(ref => {
     if (ref === discoveryApiRef) return { getBaseUrl };
-    if (ref === fetchApiRef) return { fetch };
+    if (ref === openChoreoFetchApiRef) return { fetch };
     return undefined;
   });
   return { getBaseUrl, fetch };
@@ -140,6 +137,58 @@ describe('useWirelogsStream', () => {
 
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(fetch.mock.calls[0][0]).toContain('componentName=svc');
+  });
+
+  it('passes the release line of the component', async () => {
+    const { fetch } = makeApis();
+    fetch.mockResolvedValueOnce(streamingResponse([]));
+
+    const { result } = renderHook(() =>
+      useWirelogsStream({
+        ...args,
+        componentName: 'svc',
+        releaseLine: 'canary',
+      }),
+    );
+
+    act(() => result.current.start());
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    const url = new URL(fetch.mock.calls[0][0] as string);
+    expect(url.searchParams.get('releaseLine')).toBe('canary');
+    expect(url.searchParams.has('allReleaseLines')).toBe(false);
+  });
+
+  it('asks for every line of the component when no release line is given', async () => {
+    const { fetch } = makeApis();
+    fetch.mockResolvedValueOnce(streamingResponse([]));
+
+    const { result } = renderHook(() =>
+      useWirelogsStream({ ...args, componentName: 'svc' }),
+    );
+
+    act(() => result.current.start());
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    const url = new URL(fetch.mock.calls[0][0] as string);
+    expect(url.searchParams.get('allReleaseLines')).toBe('true');
+    expect(url.searchParams.has('releaseLine')).toBe(false);
+  });
+
+  it('sends no release line scope without a component', async () => {
+    const { fetch } = makeApis();
+    fetch.mockResolvedValueOnce(streamingResponse([]));
+
+    const { result } = renderHook(() =>
+      useWirelogsStream({ ...args, releaseLine: 'canary' }),
+    );
+
+    act(() => result.current.start());
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    const url = new URL(fetch.mock.calls[0][0] as string);
+    expect(url.searchParams.has('releaseLine')).toBe(false);
+    expect(url.searchParams.has('allReleaseLines')).toBe(false);
   });
 
   it('parses frames split across chunk boundaries', async () => {

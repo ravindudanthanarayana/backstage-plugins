@@ -11,13 +11,12 @@ import StorageIcon from '@material-ui/icons/Storage';
 import ExtensionIcon from '@material-ui/icons/Extension';
 import PlayCircleOutlineIcon from '@material-ui/icons/PlayCircleOutline';
 import SettingsApplicationsIcon from '@material-ui/icons/SettingsApplications';
+import CallSplitIcon from '@material-ui/icons/CallSplit';
 
-/**
- * Single source of truth for OpenChoreo platform kind icons. Both
- * `App.tsx` (legacy `convertLegacyAppOptions.icons` shape, `kind:<x>`)
- * and `customOverrides.tsx` (NFS `DefaultEntityPresentationApi.kindIcons`
- * shape, bare `<x>`) derive their respective keyed shapes from this map.
- */
+// Single source of truth for OpenChoreo platform kind icons. Consumed
+// twice: `IconBundleBlueprint` (kind:x-keyed shape via LEGACY_KIND_ICONS)
+// and `DefaultEntityPresentationApi.kindIcons` (bare-x shape).
+
 export const KIND_ICONS: Record<string, IconComponent> = {
   environment: CloudIcon,
   observabilityalertsnotificationchannel: NotificationsIcon,
@@ -35,6 +34,7 @@ export const KIND_ICONS: Record<string, IconComponent> = {
   projecttype: CategoryIcon,
   clusterprojecttype: CategoryIcon,
   resource: StorageIcon,
+  releaseline: CallSplitIcon,
   traittype: ExtensionIcon,
   clustertraittype: ExtensionIcon,
   workflow: PlayCircleOutlineIcon,
@@ -42,7 +42,7 @@ export const KIND_ICONS: Record<string, IconComponent> = {
   componentworkflow: SettingsApplicationsIcon,
 };
 
-/** `kind:<x>`-keyed shape consumed by `convertLegacyAppOptions.icons`. */
+/** kind:x-keyed shape consumed by IconBundleBlueprint (see portalPlugin.tsx). */
 export const LEGACY_KIND_ICONS = Object.fromEntries(
   Object.entries(KIND_ICONS).map(([k, v]) => [`kind:${k}`, v]),
 );

@@ -16,6 +16,10 @@ export const CHOREO_ANNOTATIONS = {
   PROJECT_UID: 'openchoreo.io/project-uid',
   COMPONENT_TYPE: 'openchoreo.io/component-type',
   COMPONENT_TYPE_KIND: 'openchoreo.io/component-type-kind',
+  // Release lines: set on components with release lines besides the main line, and on
+  // ReleaseLine entities to name the line.
+  HAS_RELEASE_LINES: 'openchoreo.io/has-release-lines',
+  RELEASE_LINE: 'openchoreo.io/release-line',
   RESOURCE: 'openchoreo.io/resource',
   RESOURCE_UID: 'openchoreo.io/resource-uid',
   RESOURCE_TYPE: 'openchoreo.io/resource-type',
@@ -78,6 +82,7 @@ export const CHOREO_LABELS = {
   SYSTEM: 'openchoreo.io/system',
   WORKFLOW_PROJECT: 'openchoreo.dev/project',
   WORKFLOW_COMPONENT: 'openchoreo.dev/component',
+  WORKFLOW_RELEASE_LINE: 'openchoreo.dev/release-line',
   WORKFLOW_TYPE: 'openchoreo.dev/workflow-type',
   // Marks a SecretReference's category (e.g. git credentials).
   SECRET_TYPE: 'openchoreo.dev/secret-type',
@@ -199,3 +204,21 @@ export const RELATION_NOTIFIES = 'notifies';
  * RELATION_NOTIFIES.
  */
 export const RELATION_NOTIFIED_BY = 'notifiedBy';
+
+/**
+ * Header carrying the user's OpenChoreo IDP access token from the browser to
+ * the Backstage backend, which forwards it to the OpenChoreo API.
+ *
+ * The Backstage session token travels in `Authorization` and authenticates the
+ * caller to the Backstage backend; this header is what authenticates the user
+ * to OpenChoreo itself. Canonical definition for both sides of the wire.
+ */
+export const OPENCHOREO_TOKEN_HEADER = 'x-openchoreo-token';
+
+/**
+ * Request-local signal asking the OpenChoreo fetch API to call an external
+ * OpenChoreo service directly rather than via the Backstage backend: the IDP
+ * token goes in `Authorization` and no Backstage token is sent. Stripped
+ * before the request leaves the browser, so it never reaches the network.
+ */
+export const OPENCHOREO_DIRECT_HEADER = 'x-openchoreo-direct';

@@ -1,11 +1,21 @@
 import { LoggerService } from '@backstage/backend-plugin-api';
 import { Config } from '@backstage/config';
 
-import {
+import type {
   Project,
   Component,
   Connection as CellDiagramConnection,
+  Organization,
+  OrgConnection,
+  CellBounds,
 } from '@openchoreo/cell-diagram';
+
+// CellBounds boundary values, referenced by string literal rather than by
+// importing the enum. The `@openchoreo/cell-diagram` entrypoint pulls in
+// react-diagrams (a browser lib that references `self`), so importing any
+// runtime value from it would break the backend at load time.
+const EAST_BOUND = 'eb' as CellBounds; // org egress
+const WEST_BOUND = 'wb' as CellBounds; // org ingress
 import { CellDiagramService } from '../../types';
 import {
   createOpenChoreoApiClient,
@@ -14,7 +24,14 @@ import {
   fetchAllPages,
   type ObservabilityComponents,
 } from '@openchoreo/openchoreo-client-node';
-import { ComponentTypeUtils } from '@openchoreo/backstage-plugin-common';
+import {
+  ComponentTypeUtils,
+  MAIN_RELEASE_LINE,
+  isSameReleaseLine,
+  parseReleaseLineNodeId,
+  releaseLineNodeId,
+  toStoredReleaseLine,
+} from '@openchoreo/backstage-plugin-common';
 import type { OpenChoreoComponents } from '@openchoreo/openchoreo-client-node';
 
 // Use generated OpenAPI schemas directly. CellDiagramInfoService previously
@@ -103,8 +120,17 @@ function adaptRuntimeTopologyMetrics(
 // than `ComponentResponse` so the workload field can use the generated
 // `WorkloadSpec` (which includes `dependencies.resources`) instead of the
 // hand-rolled bff-types `WorkloadResponse`.
+// A component with release lines yields one entry per line: the main line keeps the
+// component name as its node id, and each release line gets its own (see
+// releaseLineNodeId). Each entry carries its line's workload.
 interface CompleteComponent {
+  /** Diagram node id: the component name, or the line's node id. */
   name: string;
+  label: string;
+  /** Release line, shown as a pill after the label. */
+  badge?: string;
+  componentName: string;
+  releaseLine?: string;
   type: string;
   workload?: WorkloadSpec;
 }
@@ -128,6 +154,22 @@ enum ConnectionType {
   WebSocket = 'web-socket',
   Connector = 'connector',
   Datastore = 'datastore',
+}
+
+// Metrics search scope for a diagram node, narrowed to its line. The main
+// node of a component with release lines carries the main badge.
+function componentScope(
+  nodeId: string,
+  badge?: string,
+): {
+  component: string;
+  releaseLine?: string;
+} {
+  const { componentName, releaseLine } = parseReleaseLineNodeId(nodeId);
+  if (releaseLine) return { component: componentName, releaseLine };
+  return badge === MAIN_RELEASE_LINE
+    ? { component: componentName, releaseLine: MAIN_RELEASE_LINE }
+    : { component: componentName };
 }
 
 /**
@@ -219,33 +261,64 @@ export class CellDiagramInfoService implements CellDiagramService {
         return this.buildProject(projectName, namespaceName, []);
       }
 
-      // Build a map from component name to workload spec
-      // Key by owner.componentName (not workload metadata name, which differs)
+      // Map component name to workload spec, keyed by owner.componentName
+      // (not workload metadata name, which differs). Release line workloads
+      // are grouped per component, keyed by owner.releaseLine.
       const workloadMap = new Map<string, WorkloadSpec>();
+      const lineWorkloadMap = new Map<string, Map<string, WorkloadSpec>>();
       for (const workload of workloadItems) {
-        const componentName = (
-          workload.spec?.owner as { componentName?: string } | undefined
-        )?.componentName;
-        if (componentName && workload.spec) {
-          workloadMap.set(componentName, workload.spec as WorkloadSpec);
+        const owner = workload.spec?.owner as
+          | { componentName?: string; releaseLine?: string }
+          | undefined;
+        const componentName = owner?.componentName;
+        if (!componentName || !workload.spec) continue;
+        const spec = workload.spec as WorkloadSpec;
+        if (owner?.releaseLine) {
+          const lines =
+            lineWorkloadMap.get(componentName) ??
+            new Map<string, WorkloadSpec>();
+          lines.set(owner.releaseLine, spec);
+          lineWorkloadMap.set(componentName, lines);
+        } else {
+          workloadMap.set(componentName, spec);
         }
       }
 
       const completeComponents: CompleteComponent[] = componentItems
-        .map(comp => {
+        .flatMap((comp): CompleteComponent[] => {
           const name = comp.metadata?.name ?? '';
           const componentTypeRef = comp.spec?.componentType;
           const componentType =
             typeof componentTypeRef === 'string'
               ? componentTypeRef
               : componentTypeRef?.name ?? '';
-          const workloadSpec = workloadMap.get(name);
 
-          return {
+          const mainLine: CompleteComponent = {
             name,
+            label: name,
+            componentName: name,
             type: componentType,
-            workload: workloadSpec,
-          } as CompleteComponent;
+            workload: workloadMap.get(name),
+          };
+          const lines = lineWorkloadMap.get(name);
+          if (!lines?.size) {
+            return [mainLine];
+          }
+
+          return [
+            { ...mainLine, badge: MAIN_RELEASE_LINE },
+            ...[...lines.entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([releaseLine, workload]) => ({
+                name: releaseLineNodeId(name, releaseLine),
+                label: name,
+                badge: releaseLine,
+                componentName: name,
+                releaseLine,
+                type: componentType,
+                workload,
+              })),
+          ];
         })
         .filter(comp => comp.name);
 
@@ -272,6 +345,143 @@ export class CellDiagramInfoService implements CellDiagramService {
         `Error fetching project info for ${projectName}: ${error}`,
       );
       return undefined;
+    }
+  }
+
+  /**
+   * Namespace-level (organization) cell diagram. Lists every project in the
+   * namespace, builds each project's architecture model (no runtime
+   * observations — the org view is architecture-only), and derives cross-cell
+   * links from each project's outbound cross-project dependencies.
+   */
+  async fetchNamespaceInfo(
+    { namespaceName }: { namespaceName: string },
+    token?: string,
+  ): Promise<Organization | undefined> {
+    try {
+      const client = createOpenChoreoApiClient({
+        baseUrl: this.baseUrl,
+        token,
+        logger: this.logger,
+      });
+
+      const projectItems = await fetchAllPages(cursor =>
+        client
+          .GET('/api/v1/namespaces/{namespaceName}/projects', {
+            params: {
+              path: { namespaceName },
+              query: { limit: 100, cursor },
+            },
+          })
+          .then(res => {
+            if (res.error || !res.response.ok) {
+              throw new Error(
+                `Failed to fetch projects: ${res.response.status} ${res.response.statusText}`,
+              );
+            }
+            return res.data;
+          }),
+      );
+
+      const projectNames = projectItems
+        .map(p => p.metadata?.name)
+        .filter((name): name is string => Boolean(name));
+
+      if (projectNames.length === 0) {
+        this.logger.info(
+          `No projects in namespace '${namespaceName}'; returning empty organization`,
+        );
+        return {
+          id: namespaceName,
+          name: namespaceName,
+          projects: [],
+          modelVersion: '1.0.0',
+        };
+      }
+
+      // Build each project's architecture model in parallel. No environment is
+      // passed, so fetchProjectInfo skips the observability enrichment.
+      const built = await Promise.all(
+        projectNames.map(projectName =>
+          this.fetchProjectInfo({ projectName, namespaceName }, token),
+        ),
+      );
+      // Fail rather than return a partial namespace: silently dropping a failed
+      // project would also drop its cross-project connections and present an
+      // incomplete diagram as a success.
+      if (built.some(project => project === undefined)) {
+        throw new Error(
+          `Failed to build one or more projects in namespace '${namespaceName}'`,
+        );
+      }
+      const projects = built.filter((p): p is Project => p !== undefined);
+
+      this.addCrossProjectConnections(projects);
+
+      return {
+        id: namespaceName,
+        name: namespaceName,
+        projects,
+        modelVersion: '1.0.0',
+      };
+    } catch (error: unknown) {
+      this.logger.error(
+        `Error fetching namespace info for ${namespaceName}: ${error}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Derives org-level (cell-to-cell) connections from each project's
+   * cross-project component dependencies. buildEndpointConnections marks such
+   * dependencies with `onPlatform === false` and encodes the target project in
+   * the connection id (`namespace:project:component:endpoint`). We add one
+   * OrgConnection per distinct source→target project pair, routed East (egress)
+   * → West (ingress), which the cell-diagram lib renders as a link between the
+   * two cells.
+   */
+  private addCrossProjectConnections(projects: Project[]): void {
+    const projectIds = new Set(projects.map(p => p.id));
+
+    for (const project of projects) {
+      const seenTargets = new Set<string>();
+      const orgConnections: OrgConnection[] = [];
+
+      for (const component of project.components) {
+        for (const conn of component.connections ?? []) {
+          // Only outbound cross-project endpoint deps (onPlatform === false).
+          if (conn.onPlatform !== false) continue;
+
+          const targetProjectId = (conn.id ?? '').split(':')[1];
+          if (
+            !targetProjectId ||
+            targetProjectId === project.id ||
+            !projectIds.has(targetProjectId) ||
+            seenTargets.has(targetProjectId)
+          ) {
+            continue;
+          }
+
+          seenTargets.add(targetProjectId);
+          orgConnections.push({
+            id: `${project.id}->${targetProjectId}`,
+            label: `${project.name} → ${targetProjectId}`,
+            source: { boundary: EAST_BOUND },
+            target: {
+              projectId: targetProjectId,
+              boundary: WEST_BOUND,
+            },
+          });
+        }
+      }
+
+      if (orgConnections.length > 0) {
+        project.connections = [
+          ...(project.connections ?? []),
+          ...orgConnections,
+        ];
+      }
     }
   }
 
@@ -384,7 +594,7 @@ export class CellDiagramInfoService implements CellDiagramService {
                 searchScope: {
                   namespace: namespaceName,
                   project: projectName,
-                  component: component.id,
+                  ...componentScope(component.id, component.badge),
                   environment: environmentName,
                 },
               },
@@ -556,6 +766,8 @@ export class CellDiagramInfoService implements CellDiagramService {
           continue;
         }
 
+        // Edges name components only, so release line nodes (whose ids add
+        // the line) don't match and their edges are skipped.
         const srcComponent = project.components.find(c => c.id === srcName);
         if (!srcComponent) {
           this.logger.info(
@@ -644,13 +856,14 @@ export class CellDiagramInfoService implements CellDiagramService {
         if (component.type!.startsWith('cronjob/')) {
           return {
             id: component.name || '',
-            label: component.name || '',
+            label: component.label,
+            badge: component.badge,
             version: '1.0.0',
             type: ComponentType.SCHEDULED_TASK,
             services: {
               main: {
                 id: component.name || '',
-                label: component.name || '',
+                label: component.label,
                 type: 'ScheduledTask',
                 dependencyIds: [],
               },
@@ -663,13 +876,14 @@ export class CellDiagramInfoService implements CellDiagramService {
         if (component.type!.startsWith('proxy/')) {
           return {
             id: component.name || '',
-            label: component.name || '',
+            label: component.label,
+            badge: component.badge,
             version: '1.0.0',
             type: ComponentType.API_PROXY,
             services: {
               main: {
                 id: component.name || '',
-                label: component.name || '',
+                label: component.label,
                 type: 'ApiProxy',
                 dependencyIds: [],
               },
@@ -694,7 +908,7 @@ export class CellDiagramInfoService implements CellDiagramService {
             }
             services[endpointName] = {
               id: component.name || '',
-              label: component.name || '',
+              label: component.label,
               type: endpoint.type || 'SERVICE',
               dependencyIds: [],
               deploymentMetadata: {
@@ -713,7 +927,7 @@ export class CellDiagramInfoService implements CellDiagramService {
           // Fallback: create a default service entry so the component renders
           services.main = {
             id: component.name || '',
-            label: component.name || '',
+            label: component.label,
             type: 'SERVICE',
             dependencyIds: [],
             deploymentMetadata: {
@@ -732,7 +946,8 @@ export class CellDiagramInfoService implements CellDiagramService {
 
         return {
           id: component.name || '',
-          label: component.name || '',
+          label: component.label,
+          badge: component.badge,
           version: '1.0.0',
           type: isWebApp ? ComponentType.WEB_APP : ComponentType.SERVICE,
           services: services,
@@ -812,22 +1027,46 @@ export class CellDiagramInfoService implements CellDiagramService {
 
       // Check if dependent component is within the same project
       const isInternal = dependentProjectName === projectName;
-      const dependentComponent = completeComponents.find(
-        comp => comp.name === dependentComponentName,
-      );
+      const dependentComponent = isInternal
+        ? this.findDependencyTarget(dependency, completeComponents)
+        : undefined;
+
+      const dependencyLine = toStoredReleaseLine(dependency.releaseLine);
+      const targetNodeId = dependencyLine
+        ? releaseLineNodeId(dependentComponentName, dependencyLine)
+        : dependentComponentName;
+      const targetLine = dependentComponent?.badge ?? dependencyLine;
+      const targetLabel = targetLine
+        ? `${dependentComponentName}:${targetLine}`
+        : dependentComponentName;
 
       const connectionId =
         isInternal && dependentComponent
           ? `${namespaceName}:${projectName}:${dependentComponent.name}:${dependency.name}`
-          : `${namespaceName}:${dependentProjectName}:${dependentComponentName}:${dependency.name}`;
+          : `${namespaceName}:${dependentProjectName}:${targetNodeId}:${dependency.name}`;
 
       return {
         id: connectionId,
-        label: `${dependentComponentName}/${dependency.name}`,
+        label: `${targetLabel}/${dependency.name}`,
         type: ConnectionType.HTTP, // TODO Infer based on api response
         onPlatform: isInternal,
         tooltip: `Dependency on ${dependentComponentName} in ${dependentProjectName}`,
       };
     });
+  }
+
+  /**
+   * The node a same-project dependency points at: the named release line, or
+   * the component's main line when it names none.
+   */
+  private findDependencyTarget(
+    dependency: EndpointDependency,
+    completeComponents: CompleteComponent[],
+  ): CompleteComponent | undefined {
+    return completeComponents.find(
+      comp =>
+        comp.componentName === dependency.component &&
+        isSameReleaseLine(comp.releaseLine, dependency.releaseLine),
+    );
   }
 }

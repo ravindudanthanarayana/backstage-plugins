@@ -1,6 +1,7 @@
 {
   "name": "@openchoreo/backstage-plugin-openchoreo-workflows",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
+  "description": "Backstage frontend plugin for OpenChoreo generic workflows: browse workflows, trigger runs, and inspect run history.",
   "license": "Apache-2.0",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -23,8 +24,7 @@
     "access": "public",
     "main": "dist/index.esm.js",
     "types": "dist/index.d.ts",
-    "alpha": "dist/alpha.esm.js",
-    "registry": "https://npm.pkg.github.com"
+    "alpha": "dist/alpha.esm.js"
   },
   "repository": {
     "type": "git",
@@ -67,6 +67,7 @@
     "yaml": "^2.8.2"
   },
   "peerDependencies": {
+    "@openchoreo/backstage-plugin": "^1.4.0-m.2",
     "react": "^18.0.0",
     "react-router-dom": "^6.0.0"
   },

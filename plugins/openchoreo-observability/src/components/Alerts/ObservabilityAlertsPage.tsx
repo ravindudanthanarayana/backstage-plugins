@@ -19,7 +19,8 @@ import {
   pickRangeForAge,
   useProjectEnvironments,
 } from '@openchoreo/backstage-plugin-react';
-import { EnvironmentsStatusNotice } from '../common';
+import { EnvironmentsStatusNotice, ReleaseLineFilter } from '../common';
+import { componentDefaultReleaseLine } from '../../hooks/useSelectedReleaseLine';
 import { useRuntimeLogsStyles } from '../RuntimeLogs/styles';
 import type { AlertSummary } from '../../types';
 
@@ -240,6 +241,15 @@ const ObservabilityAlertsContent = () => {
         environments={environments}
         environmentsLoading={environmentsLoading}
         disabled={alertsLoading}
+        releaseLineFilter={
+          <ReleaseLineFilter
+            gridItem
+            defaultLine={componentDefaultReleaseLine(entity)}
+            namespace={namespace}
+            component={componentName}
+            disabled={alertsLoading}
+          />
+        }
       />
 
       {alertsError && renderError(alertsError)}

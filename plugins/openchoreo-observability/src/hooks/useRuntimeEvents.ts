@@ -7,6 +7,10 @@ import {
   calculateTimeRange,
   useOpenChoreoInfiniteQuery,
 } from '@openchoreo/backstage-plugin-react';
+import {
+  componentDefaultReleaseLine,
+  useSelectedReleaseLine,
+} from './useSelectedReleaseLine';
 
 export interface UseRuntimeEventsOptions {
   environment: string;
@@ -55,6 +59,9 @@ export function useRuntimeEvents(
   enabled: boolean = true,
 ): UseRuntimeEventsResult {
   const observabilityApi = useApi(observabilityApiRef);
+  const releaseLine = useSelectedReleaseLine(
+    componentDefaultReleaseLine(entity),
+  );
 
   const componentName =
     entity.metadata.annotations?.[CHOREO_ANNOTATIONS.COMPONENT];
@@ -78,6 +85,7 @@ export function useRuntimeEvents(
       project,
       options.environment,
       componentName ?? null,
+      releaseLine ?? null,
       options.timeRange,
       options.customStartTime,
       options.customEndTime,
@@ -103,7 +111,7 @@ export function useRuntimeEvents(
         project,
         options.environment,
         componentName!,
-        { limit: pageSize, startTime, endTime, sortOrder },
+        { limit: pageSize, startTime, endTime, sortOrder, releaseLine },
       );
       return { items: response.events, total: response.total ?? 0 };
     },

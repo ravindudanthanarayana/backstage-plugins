@@ -10,12 +10,9 @@ import {
   Typography,
 } from '@material-ui/core';
 import CheckIcon from '@material-ui/icons/Check';
-import { Alert } from '@material-ui/lab';
-import {
-  useApi,
-  fetchApiRef,
-  discoveryApiRef,
-} from '@backstage/core-plugin-api';
+import { Alert, AlertTitle } from '@material-ui/lab';
+import { useApi, discoveryApiRef } from '@backstage/core-plugin-api';
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import { catalogApiRef } from '@backstage/plugin-catalog-react';
 import { stringifyEntityRef } from '@backstage/catalog-model';
 import {
@@ -25,9 +22,12 @@ import {
 } from '@openchoreo/backstage-plugin-react';
 import {
   CHOREO_ANNOTATIONS,
+  MAIN_RELEASE_LINE,
   openchoreoReleaseBindingUpdatePermission,
 } from '@openchoreo/backstage-plugin-common';
 import { applyResourceChange } from '../../utils/applyResourceChange';
+import { useComponentReleaseLineState } from '../../hooks/useComponentReleaseLines';
+import { useSelectedReleaseLine } from '../../hooks/useSelectedReleaseLine';
 import {
   buildOptimizeChange,
   buildRecommendationChanges,
@@ -87,7 +87,7 @@ export const CostOptimizeButton = ({
   onOptimized,
   disabled: disabledProp,
 }: CostOptimizeButtonProps) => {
-  const fetchApi = useApi(fetchApiRef);
+  const fetchApi = useApi(openChoreoFetchApiRef);
   const discovery = useApi(discoveryApiRef);
 
   const resourceRef = useComponentEntityRef(scope);
@@ -96,6 +96,15 @@ export const CostOptimizeButton = ({
     resourceRef: resourceRef ?? '',
     environment: env,
   });
+
+  // The recommendation covers the selected line, or every line of the
+  // component when none is selected, which no single binding matches.
+  const releaseLine = useSelectedReleaseLine();
+  const componentLines = useComponentReleaseLineState(
+    scope.namespace,
+    scope.component,
+  );
+  const lineRequired = !releaseLine && componentLines.lines.length > 0;
 
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<ApplyStatus>('idle');
@@ -117,6 +126,7 @@ export const CostOptimizeButton = ({
         projectName: scope.project!,
         componentName: scope.component!,
         environment: env,
+        releaseLine,
       });
 
       await applyResourceChange({
@@ -124,6 +134,10 @@ export const CostOptimizeButton = ({
         fetchApi,
         namespaceName: scope.namespace!,
         change: buildOptimizeChange(releaseBinding, recommendation),
+        expectedOwner: {
+          componentName: scope.component,
+          releaseLine: releaseLine ?? MAIN_RELEASE_LINE,
+        },
       });
 
       setStatus('success');
@@ -135,7 +149,15 @@ export const CostOptimizeButton = ({
       );
       setStatus('failed');
     }
-  }, [discovery, fetchApi, scope, env, recommendation, onOptimized]);
+  }, [
+    discovery,
+    fetchApi,
+    scope,
+    env,
+    recommendation,
+    onOptimized,
+    releaseLine,
+  ]);
 
   if (status === 'success') {
     return (
@@ -151,9 +173,17 @@ export const CostOptimizeButton = ({
   }
 
   const disabled =
-    permissionLoading || !allowed || !resourceRef || Boolean(disabledProp);
+    permissionLoading ||
+    componentLines.loading ||
+    lineRequired ||
+    !allowed ||
+    !resourceRef ||
+    Boolean(disabledProp);
   let tooltipTitle = '';
   if (disabledProp) tooltipTitle = 'No recommendations to apply';
+  else if (lineRequired)
+    tooltipTitle =
+      'Choose a release line to apply its recommendation. With all lines, it covers every line of the component.';
   else if (!allowed)
     tooltipTitle = `You do not have permission to modify the deployment in ${env}`;
   const changes = buildRecommendationChanges(recommendation);
@@ -194,6 +224,17 @@ export const CostOptimizeButton = ({
           {changes.length === 1 ? 'change' : 'changes'})
         </DialogTitle>
         <DialogContent dividers>
+          <Box mb={2}>
+            <Alert severity="warning">
+              <AlertTitle>Note</AlertTitle>
+              These values are recommendations derived from the resource usage
+              observed over the selected period. They may not account for
+              traffic spikes, periodic jobs or start-up requirements outside
+              that window, and under-sizing a workload can lead to CPU
+              throttling or out-of-memory restarts. Apply them only if you agree
+              they reflect what this component needs.
+            </Alert>
+          </Box>
           <ChangesList
             sections={[{ title: 'Component Overrides', changes }]}
             emptyMessage="No changes to apply"
@@ -203,8 +244,13 @@ export const CostOptimizeButton = ({
             color="textSecondary"
             style={{ marginTop: 16 }}
           >
-            This will trigger a redeployment of the <strong>{env}</strong>{' '}
-            environment.
+            This will trigger a redeployment of{' '}
+            {releaseLine && (
+              <>
+                release line <strong>{releaseLine}</strong> in{' '}
+              </>
+            )}
+            the <strong>{env}</strong> environment.
           </Typography>
           {status === 'failed' && (
             <Box mt={2}>

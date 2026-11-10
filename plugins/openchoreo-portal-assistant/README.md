@@ -1,9 +1,15 @@
 # @openchoreo/backstage-plugin-openchoreo-portal-assistant
 
-The Backstage frontend for **Perch** — the OpenChoreo AI assistant. Provides
-the chat drawer, the global FAB, and the contextual launchers mounted on
-component pages (failed-build snackbar, build-tab launcher, logs-tab "Ask
-Perch" pill).
+The Backstage frontend for the **Portal Assistant** — the OpenChoreo AI assistant. Provides
+the chat drawer and the contextual launchers mounted on component pages
+(failed-build snackbar, deploy-panel and log-row "investigate" actions). There
+is no global FAB — see "Status" below.
+
+## Requirements
+
+Requires [`@openchoreo/backstage-plugin`](../openchoreo) (the OpenChoreo
+core plugin) to be installed in the same Backstage app. The core plugin
+provides the fetch / permission / auth APIs this plugin uses.
 
 ## Status: internal plugin
 
@@ -11,10 +17,13 @@ This plugin is part of the OpenChoreo Backstage app. It is **not** published
 as a standalone Backstage plugin and has no third-party consumers — there
 are no public extension points, no scaffolder actions, no permission rules.
 
-The plugin shell exists for one reason: to register the
-`perchAgentApiRef` API factory through Backstage's idiomatic apiRef
-pattern, so consumers do `useApi(perchAgentApiRef)` instead of
-constructing the client by hand.
+The plugin shell exists so consumers can do `useApi(portalAssistantApiRef)`
+instead of constructing the client by hand. Note that the `apis` array on
+`openchoreoPortalAssistantPlugin` (`src/plugin.ts`) is **never read at runtime** — the
+plugin registers no routable or component extension, so the loader never
+visits it. The factory that actually gets wired lives in the alpha module
+(`src/alpha.tsx`); removing it there causes `NotImplementedError` in
+`AssistantDrawerProvider`.
 
 UI components (`AssistantDrawerProvider` and the page-scoped launchers)
 are exported as plain React components from `src/index.ts`. They are
@@ -24,45 +33,68 @@ already on the critical path of every entity page; the indirection
 costs more than it saves at this size. If a future component grows
 large enough that lazy-loading matters, wrap that one specifically.
 
-There is **no global "always-on" FAB**. Perch is surfaced by
+There is **no global "always-on" FAB**. The assistant is surfaced by
 contextual launchers on the pages where it can do useful work
 (component build tab, runtime logs tab, the failed-build snackbar).
 Mounting a global FAB invited the user into a chat that had no scope
-and degraded the UX on pages where Perch can't act. If we ever want
+and degraded the UX on pages where it can't act. If we ever want
 a FAB again, scope it to specific routes rather than mounting it at
 the app root.
 
 ## Mounting
 
-```tsx
-// packages/app/src/components/Root/Root.tsx
-import { AssistantDrawerProvider } from '@openchoreo/backstage-plugin-openchoreo-portal-assistant';
+Everything is wired by the package's **default export** from `./alpha` — a
+`createFrontendModule({ pluginId: 'app' })` carrying the drawer wrapper, the
+`portalAssistantApiRef` factory, the `portalAssistantIntegrationApiRef` slots, and
+the observability log-row action.
 
-<AssistantDrawerProvider>
-  {/* app shell — the provider owns the chat drawer's open state and
-      renders the drawer itself; mount it once at the app root so any
-      launcher anywhere can call openDrawer({...}). */}
-</AssistantDrawerProvider>;
+Because that is the _default_ export, the dependency is the whole installation.
+The portal's `app` package has `app.packages: all` in `app-config.yaml`, so
+frontend feature discovery installs the assistant with no `features` entry and
+no import:
+
+```yaml
+app:
+  packages: all
 ```
 
+A host that does not use discovery installs the same export by hand:
+
 ```tsx
-// packages/app/src/components/catalog/EntityPage.tsx
-import {
-  FailedBuildSnackbar,
-  BuildPagePromptLauncher,
-  LogsPageDebugPrompt,
-} from '@openchoreo/backstage-plugin-openchoreo-portal-assistant';
+import assistantFeature from '@openchoreo/backstage-plugin-openchoreo-portal-assistant/alpha';
+
+export default createPortalApp({ features: [assistantFeature] }).createRoot();
 ```
+
+Keep it the _default_ export either way — discovery reads nothing else.
+
+The wiring deliberately does **not** live in
+`@openchoreo/backstage-portal-app`: this is a private plugin, and keeping it
+out of the shell is what lets the shell be published. A portal that should not
+ship the assistant drops the install.
+
+The drawer mounts itself at the app root via `AppRootWrapperBlueprint`, so
+hosts no longer wrap the shell in `<AssistantDrawerProvider>` by hand. The
+remaining surfaces reach the host through `portalAssistantIntegrationApiRef`
+(see `usePortalAssistant` in `@openchoreo/backstage-plugin-react`), which
+renders nothing when no implementation is registered.
+
+`BuildPagePromptLauncher` and `LogsPageDebugPrompt` are exported but currently
+have no consumers — mount them yourself if you want those launchers.
 
 The plugin is feature-gated by `openchoreo.features.assistant.enabled`
 (env var `OPENCHOREO_FEATURES_ASSISTANT_ENABLED`); when disabled the
-launchers and FAB render `null`. Note: the env var still says
-`ASSISTANT` — the rename to `PERCH` is layer-2 work tracked separately
-because it would break existing installs.
+launchers render `null`. #559 renamed this plugin _from_ Perch _to_ Portal
+Assistant; the config key, plugin id and apiRef id read `portal-assistant`,
+and the TypeScript symbols now match it too (`portalAssistantApiRef`,
+`PortalAssistantClient`, `PortalAssistantApi`,
+`openchoreoPortalAssistantPlugin`). `portal-assistant` in comments and config
+prose refers to the upstream _service_ (`agents/portal-assistant` in the
+openchoreo repo), not to this plugin.
 
 ## Backend
 
-The frontend talks to the `perch-agent` service in the OpenChoreo
+The frontend talks to the `portal-assistant` service in the OpenChoreo
 control plane through the **`openchoreo-portal-assistant-backend`** Node plugin
 (see `plugins/openchoreo-portal-assistant-backend/`), which runs inside the
 Backstage backend Express process and forwards requests upstream.
@@ -76,8 +108,10 @@ Configure the upstream in `app-config.yaml`:
 
 ```yaml
 openchoreo:
-  perchAgentUrl: ${OPENCHOREO_PERCH_AGENT_URL}
+  portalAssistantUrl: ${OPENCHOREO_PORTAL_ASSISTANT_URL}
 ```
+
+The backend plugin self-disables when that key is unset.
 
 The backend plugin streams ndjson byte-for-byte for `/chat`, so the
 LLM-call latency profile matches what you'd get from a direct hit. It
@@ -93,12 +127,12 @@ slots that justify the plugin (vs. just a proxy entry) are:
 
 1. **Backstage permission framework gating** —
    `requirePermission()` middleware only works in backend plugins. To
-   layer "this user/role can use Perch" on top of the agent's own
+   layer "this user/role can use the assistant" on top of the agent's own
    `assistant:invoke` check, the rule lives here.
 2. **Server-side scope enrichment** — fetching the catalog entity,
    resolving the project annotation, looking up the selected
    environment, and injecting them into the request before forwarding.
-3. **Multi-backend routing** — selecting between Perch and a future
+3. **Multi-backend routing** — selecting between the portal-assistant agent and a future
    on-prem model (or a Claude variant) per-org / per-user.
 4. **Server-side rate limiting / quota** tied to Backstage identity.
 5. **Backstage-identity-correlated audit logs** distinct from the

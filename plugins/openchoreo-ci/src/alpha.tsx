@@ -1,11 +1,12 @@
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import {
   ApiBlueprint,
   createFrontendPlugin,
   discoveryApiRef,
-  fetchApiRef,
   PluginWrapperBlueprint,
 } from '@backstage/frontend-plugin-api';
 import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
+import { isOpenChoreoManagedOfKind } from '@openchoreo/backstage-plugin-common';
 
 import { rootRouteRef } from './routes';
 import { openChoreoCiClientApiRef } from './api/OpenChoreoCiClientApi';
@@ -16,7 +17,7 @@ const ciClientApi = ApiBlueprint.make({
   params: defineParams =>
     defineParams({
       api: openChoreoCiClientApiRef,
-      deps: { discoveryApi: discoveryApiRef, fetchApi: fetchApiRef },
+      deps: { discoveryApi: discoveryApiRef, fetchApi: openChoreoFetchApiRef },
       factory: ({ discoveryApi, fetchApi }) =>
         new OpenChoreoCiClient(discoveryApi, fetchApi),
     }),
@@ -43,7 +44,8 @@ const workflowsEntityContent = EntityContentBlueprint.make({
   params: {
     path: '/workflows',
     title: 'Build',
-    filter: 'kind:component',
+    group: 'build',
+    filter: isOpenChoreoManagedOfKind('component'),
     loader: () => import('./components/Workflows').then(m => <m.Workflows />),
   },
 });

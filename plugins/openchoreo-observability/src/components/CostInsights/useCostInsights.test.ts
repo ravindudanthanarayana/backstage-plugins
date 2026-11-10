@@ -1,3 +1,5 @@
+import { createElement, type ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useApi } from '@backstage/core-plugin-api';
 import { createQueryWrapper } from '@openchoreo/test-utils';
@@ -51,7 +53,6 @@ const baseParams = (
   level: 'namespace',
   environments: ['dev'],
   timeRange: '1h',
-  view: 'table',
   granularity: '1d',
   ...over,
 });
@@ -72,6 +73,28 @@ describe('useCostInsights', () => {
     getCostRecommendations.mockResolvedValue({ items: [] });
   });
 
+  it("issues a pair's six requests together rather than in a chain", async () => {
+    const release: Array<() => void> = [];
+    const hold = () =>
+      new Promise(resolve => {
+        release.push(() => resolve({ items: [] }));
+      });
+    getCosts.mockImplementation(hold);
+    getCostRecommendations.mockImplementation(hold);
+
+    const { result } = renderHook(() => useCostInsights(baseParams()), {
+      wrapper: createQueryWrapper(),
+    });
+
+    // Four cost windows and two recommendation windows, all in flight at once:
+    // none of them resolves until the test lets them.
+    await waitFor(() => expect(getCosts).toHaveBeenCalledTimes(4));
+    expect(getCostRecommendations).toHaveBeenCalledTimes(2);
+
+    release.forEach(resolve => resolve());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
   it('fetches a current and previous window per environment and aggregates', async () => {
     const { result } = renderHook(
       () => useCostInsights(baseParams({ environments: ['dev', 'prod'] })),
@@ -80,10 +103,11 @@ describe('useCostInsights', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    // 2 envs × (current + previous) = 4 cost calls; recommendations only at the
-    // component level, so none here.
-    expect(getCosts).toHaveBeenCalledTimes(4);
-    expect(getCostRecommendations).not.toHaveBeenCalled();
+    // 2 envs × (current + series + month-to-date + previous) = 8 cost calls;
+    // recommendations are fetched twice per env (selected window + month-to-date
+    // for the forecast's "if applied" curve) = 4.
+    expect(getCosts).toHaveBeenCalledTimes(8);
+    expect(getCostRecommendations).toHaveBeenCalledTimes(4);
     expect(result.current.data?.level).toBe('namespace');
     expect(result.current.data?.rows.map(r => r.key)).toContain('gcp');
     expect(result.current.error).toBeNull();
@@ -110,8 +134,8 @@ describe('useCostInsights', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    // 2 scopes × 1 env × (current + previous) = 4 cost calls.
-    expect(getCosts).toHaveBeenCalledTimes(4);
+    // 2 scopes × 1 env × (current + series + month-to-date + previous) = 8 calls.
+    expect(getCosts).toHaveBeenCalledTimes(8);
     const keys = result.current.data?.rows.map(r => r.key) ?? [];
     expect(keys).toEqual(expect.arrayContaining(['p1', 'p2']));
   });
@@ -124,8 +148,9 @@ describe('useCostInsights', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    // The duplicate env collapses to one: 1 env × (current + previous) = 2 calls.
-    expect(getCosts).toHaveBeenCalledTimes(2);
+    // The duplicate env collapses to one: 1 env ×
+    // (current + series + month-to-date + previous) = 4 calls.
+    expect(getCosts).toHaveBeenCalledTimes(4);
     // A single dev item (cpu 10 + mem 12), not double-counted.
     expect(result.current.data?.summary.totalCost).toBe(22);
   });
@@ -160,9 +185,25 @@ describe('useCostInsights', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(getCostRecommendations).toHaveBeenCalledTimes(1);
+    // Selected window + month-to-date recommendations = 2 calls.
+    expect(getCostRecommendations).toHaveBeenCalledTimes(2);
     const devRow = result.current.data?.rows.find(r => r.key === 'dev');
     expect(devRow?.recommendation?.total).toBe(8);
+  });
+
+  it('fetches only current + previous cost in summary-only mode', async () => {
+    const { result } = renderHook(
+      () => useCostInsights(baseParams({ summaryOnly: true })),
+      { wrapper: createQueryWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // 1 env × (current + previous); series, month-to-date and recommendations
+    // are skipped.
+    expect(getCosts).toHaveBeenCalledTimes(2);
+    expect(getCostRecommendations).not.toHaveBeenCalled();
+    expect(result.current.data?.summary.totalCost).toBe(22);
   });
 
   it('withholds a recommendation when the binding changed after the window started', async () => {
@@ -202,6 +243,47 @@ describe('useCostInsights', () => {
     expect(devRow?.recommendationStale).toBe(true);
     expect(devRow?.recommendationStaleSince).toBe('2026-07-02T00:00:00.000Z');
     expect(devRow?.recommendation).toBeUndefined();
+  });
+
+  it('reads the live spec values of the selected release line', async () => {
+    getCostRecommendations.mockResolvedValue({
+      items: [
+        {
+          component: 'comp',
+          environment: 'dev',
+          project: 'gcp',
+          namespace: 'default',
+          current: { cpuCost: 22, memoryCost: 0, cpuRequest: '100m' },
+          recommendation: { cpuCost: 5, memoryCost: 3, cpuRequest: '50m' },
+        },
+      ],
+    });
+    const QueryWrapper = createQueryWrapper();
+    const { result } = renderHook(
+      () =>
+        useCostInsights(
+          baseParams({
+            scopes: [
+              { namespace: 'default', project: 'gcp', component: 'comp' },
+            ],
+            level: 'component',
+            environments: ['dev'],
+          }),
+        ),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(
+            MemoryRouter,
+            { initialEntries: ['/?releaseLine=next'] },
+            createElement(QueryWrapper, null, children),
+          ),
+      },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockFetchBindingInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ componentName: 'comp', releaseLine: 'next' }),
+    );
   });
 
   it('overrides the recommendation current request with live spec values', async () => {
@@ -250,16 +332,16 @@ describe('useCostInsights', () => {
     expect(devRow?.recommendation?.current?.cpuRequest).toBe('250m');
   });
 
-  it('passes the granularity only in graph view', async () => {
+  it('passes the granularity on the bucketed time-series request', async () => {
     const { result } = renderHook(
-      () => useCostInsights(baseParams({ view: 'graph', granularity: '6h' })),
+      () => useCostInsights(baseParams({ granularity: '6h' })),
       { wrapper: createQueryWrapper() },
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    // Graph view fetches an accumulated window (no granularity) plus a bucketed
-    // time-series window that carries the granularity.
+    // Fetches an accumulated window (no granularity) plus a bucketed time-series
+    // window that carries the granularity.
     const opts = getCosts.mock.calls.map(c => c[2]);
     expect(opts).toEqual(
       expect.arrayContaining([expect.objectContaining({ granularity: '6h' })]),
@@ -279,7 +361,7 @@ describe('useCostInsights', () => {
     );
 
     const { result } = renderHook(
-      () => useCostInsights(baseParams({ view: 'graph', granularity: '6h' })),
+      () => useCostInsights(baseParams({ granularity: '6h' })),
       { wrapper: createQueryWrapper() },
     );
 

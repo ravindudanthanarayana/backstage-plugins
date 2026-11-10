@@ -1,8 +1,8 @@
 {
   "name": "@openchoreo/backstage-plugin-catalog-backend-module",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
   "license": "Apache-2.0",
-  "description": "The openchoreo backend module for the catalog plugin.",
+  "description": "Backstage catalog entity provider that syncs OpenChoreo projects, components, environments, and platform resources into the software catalog.",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "repository": {
@@ -13,8 +13,7 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.cjs.js",
-    "types": "dist/index.d.ts",
-    "registry": "https://npm.pkg.github.com"
+    "types": "dist/index.d.ts"
   },
   "backstage": {
     "role": "backend-plugin-module",

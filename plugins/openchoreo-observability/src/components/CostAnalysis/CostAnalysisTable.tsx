@@ -1,4 +1,4 @@
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { Table, TableColumn } from '@backstage/core-components';
 import {
   Box,
@@ -45,6 +45,7 @@ export const CostAnalysisTable = ({
   loading = false,
 }: CostAnalysisTableProps) => {
   const classes = useStyles();
+  const { search } = useLocation();
   const mapStatusToStatusType = (
     status?: 'pending' | 'completed' | 'failed',
   ): StatusType => {
@@ -87,9 +88,20 @@ export const CostAnalysisTable = ({
       render: (row: any) => {
         const report = row as FinOpsReportSummary;
         return (
-          <Typography variant="body2" className={classes.truncateSingleLine}>
-            {report.component || 'N/A'}
-          </Typography>
+          <>
+            <Typography variant="body2" className={classes.truncateSingleLine}>
+              {report.component || 'N/A'}
+            </Typography>
+            {report.releaseLine && (
+              <Typography
+                variant="caption"
+                color="textSecondary"
+                className={classes.truncateSingleLine}
+              >
+                {report.releaseLine}
+              </Typography>
+            )}
+          </>
         );
       },
     },
@@ -154,7 +166,7 @@ export const CostAnalysisTable = ({
                 <IconButton
                   size="small"
                   component={RouterLink}
-                  to={`./${report.reportId}`}
+                  to={{ pathname: `./${report.reportId}`, search }}
                   aria-label="view report"
                 >
                   <DescriptionOutlinedIcon fontSize="small" />

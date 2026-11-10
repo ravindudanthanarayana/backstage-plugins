@@ -9,6 +9,9 @@ import {
   applyEnvChange,
   applyFileChange,
   applyResourceChange,
+  assertBindingOwner,
+  resolveTargetKind,
+  tryResolveTargetKind,
 } from './applyResourceChange';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +25,7 @@ describe('applyJsonPointer', () => {
       doc,
       '/spec/componentTypeEnvironmentConfigs/resources/requests/cpu',
       '50m',
+      'ReleaseBinding',
     );
     expect(
       doc.spec.componentTypeEnvironmentConfigs.resources.requests.cpu,
@@ -30,13 +34,23 @@ describe('applyJsonPointer', () => {
 
   it('sets a value at a valid spec/workloadOverrides pointer', () => {
     const doc: any = {};
-    applyJsonPointer(doc, '/spec/workloadOverrides/container/replicas', 2);
+    applyJsonPointer(
+      doc,
+      '/spec/workloadOverrides/container/replicas',
+      2,
+      'ReleaseBinding',
+    );
     expect(doc.spec.workloadOverrides.container.replicas).toBe(2);
   });
 
   it('sets a value at a valid spec/traitEnvironmentConfigs pointer', () => {
     const doc: any = {};
-    applyJsonPointer(doc, '/spec/traitEnvironmentConfigs/my-trait/timeout', 30);
+    applyJsonPointer(
+      doc,
+      '/spec/traitEnvironmentConfigs/my-trait/timeout',
+      30,
+      'ReleaseBinding',
+    );
     expect(doc.spec.traitEnvironmentConfigs['my-trait'].timeout).toBe(30);
   });
 
@@ -52,6 +66,7 @@ describe('applyJsonPointer', () => {
       doc,
       '/spec/componentTypeEnvironmentConfigs/resources/requests/cpu',
       '50m',
+      'ReleaseBinding',
     );
     expect(
       doc.spec.componentTypeEnvironmentConfigs.resources.requests.cpu,
@@ -64,6 +79,7 @@ describe('applyJsonPointer', () => {
       doc,
       '/spec/componentTypeEnvironmentConfigs/resources/requests/cpu',
       '10m',
+      'ReleaseBinding',
     );
     expect(
       doc.spec.componentTypeEnvironmentConfigs.resources.requests.cpu,
@@ -72,20 +88,25 @@ describe('applyJsonPointer', () => {
 
   it('throws for pointer with fewer than 3 segments', () => {
     expect(() =>
-      applyJsonPointer({}, '/spec/componentTypeEnvironmentConfigs', 'x'),
+      applyJsonPointer(
+        {},
+        '/spec/componentTypeEnvironmentConfigs',
+        'x',
+        'ReleaseBinding',
+      ),
     ).toThrow('Invalid pointer');
   });
 
   it('throws for pointer not starting with /spec/', () => {
-    expect(() => applyJsonPointer({}, '/metadata/name/foo', 'x')).toThrow(
-      'Invalid pointer',
-    );
+    expect(() =>
+      applyJsonPointer({}, '/metadata/name/foo', 'x', 'ReleaseBinding'),
+    ).toThrow('Invalid pointer');
   });
 
   it('throws for pointer with a disallowed spec category', () => {
-    expect(() => applyJsonPointer({}, '/spec/containers/0/image', 'x')).toThrow(
-      'Invalid pointer',
-    );
+    expect(() =>
+      applyJsonPointer({}, '/spec/containers/0/image', 'x', 'ReleaseBinding'),
+    ).toThrow('Invalid pointer');
   });
 });
 
@@ -183,6 +204,58 @@ describe('applyFileChange', () => {
 // applyResourceChange (integration: GET → mutate → PUT)
 // ---------------------------------------------------------------------------
 
+describe('assertBindingOwner', () => {
+  const binding = {
+    spec: { owner: { componentName: 'checkout', releaseLine: 'canary' } },
+  };
+
+  it('accepts a binding on the expected component and line', () => {
+    expect(() =>
+      assertBindingOwner(binding, 'b', {
+        componentName: 'checkout',
+        releaseLine: 'canary',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a binding on another release line', () => {
+    expect(() =>
+      assertBindingOwner(binding, 'b', { releaseLine: 'stable' }),
+    ).toThrow("belongs to release line 'canary', not 'stable'");
+  });
+
+  it('rejects a binding with no release line when one is expected', () => {
+    expect(() =>
+      assertBindingOwner({ spec: { owner: {} } }, 'b', {
+        releaseLine: 'canary',
+      }),
+    ).toThrow("is not on release line 'canary'");
+  });
+
+  it('rejects a binding of another component', () => {
+    expect(() =>
+      assertBindingOwner(binding, 'b', { componentName: 'cart' }),
+    ).toThrow("belongs to component 'checkout', not 'cart'");
+  });
+
+  it('matches main to a binding without a release line', () => {
+    expect(() =>
+      assertBindingOwner({ spec: { owner: {} } }, 'b', {
+        releaseLine: 'main',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertBindingOwner(binding, 'b', { releaseLine: 'main' }),
+    ).toThrow("belongs to release line 'canary', not 'main'");
+  });
+
+  it('skips the line check when no line is expected', () => {
+    expect(() =>
+      assertBindingOwner(binding, 'b', { componentName: 'checkout' }),
+    ).not.toThrow();
+  });
+});
+
 describe('applyResourceChange', () => {
   const mockFetchApi = { fetch: jest.fn() };
   const baseUrl = 'http://backend';
@@ -205,6 +278,26 @@ describe('applyResourceChange', () => {
       statusText: ok ? 'OK' : 'Internal Server Error',
     } as Response);
   }
+
+  it('does not PUT a binding that belongs to another release line', async () => {
+    mockFetchApi.fetch.mockResolvedValueOnce(
+      makeGetResponse({
+        metadata: { name: 'checkout-stable-development' },
+        spec: { owner: { componentName: 'checkout', releaseLine: 'stable' } },
+      }),
+    );
+
+    await expect(
+      applyResourceChange({
+        backendBaseUrl: baseUrl,
+        fetchApi: mockFetchApi as any,
+        namespaceName,
+        change: { release_binding: 'checkout-stable-development', fields: [] },
+        expectedOwner: { componentName: 'checkout', releaseLine: 'canary' },
+      }),
+    ).rejects.toThrow("not 'canary'");
+    expect(mockFetchApi.fetch).toHaveBeenCalledTimes(1);
+  });
 
   it('GETs, applies field changes, and PUTs the updated binding', async () => {
     const binding = {
@@ -296,7 +389,7 @@ describe('applyResourceChange', () => {
         namespaceName,
         change: { release_binding: 'missing-binding' },
       }),
-    ).rejects.toThrow("Release binding 'missing-binding' not found");
+    ).rejects.toThrow("Not found: release binding 'missing-binding'");
   });
 
   it('throws with a generic message on non-404 GET failure', async () => {
@@ -347,5 +440,223 @@ describe('applyResourceChange', () => {
     const getUrl = mockFetchApi.fetch.mock.calls[0][0] as string;
     expect(getUrl).toContain('namespaceName=my%20namespace');
     expect(getUrl).toContain('bindingName=my%20binding');
+  });
+
+  it('routes a ResourceReleaseBinding change to the resource endpoint', async () => {
+    const binding = {
+      metadata: { name: 'pg-development' },
+      spec: { resourceTypeEnvironmentConfigs: { persistenceEnabled: true } },
+    };
+    mockFetchApi.fetch
+      .mockResolvedValueOnce(makeGetResponse(binding))
+      .mockResolvedValueOnce(makePutResponse());
+
+    await applyResourceChange({
+      backendBaseUrl: baseUrl,
+      fetchApi: mockFetchApi as any,
+      namespaceName,
+      change: {
+        target_kind: 'ResourceReleaseBinding',
+        release_binding: 'pg-development',
+        fields: [
+          {
+            json_pointer: '/spec/resourceTypeEnvironmentConfigs/memory',
+            value: '256Mi',
+          },
+        ],
+      },
+    });
+
+    const expectedUrl = `${baseUrl}/resource-release-binding?namespaceName=dev&bindingName=pg-development`;
+    expect(mockFetchApi.fetch).toHaveBeenNthCalledWith(1, expectedUrl);
+
+    const [putUrl, putOpts] = mockFetchApi.fetch.mock.calls[1];
+    expect(putUrl).toBe(expectedUrl);
+    expect(JSON.parse(putOpts.body).spec).toEqual({
+      resourceTypeEnvironmentConfigs: {
+        persistenceEnabled: true,
+        memory: '256Mi',
+      },
+    });
+  });
+
+  it('routes a change with no target_kind to the release binding endpoint', async () => {
+    mockFetchApi.fetch
+      .mockResolvedValueOnce(makeGetResponse({ metadata: {}, spec: {} }))
+      .mockResolvedValueOnce(makePutResponse());
+
+    await applyResourceChange({
+      backendBaseUrl: baseUrl,
+      fetchApi: mockFetchApi as any,
+      namespaceName,
+      change: { release_binding: 'my-binding' },
+    });
+
+    expect(mockFetchApi.fetch).toHaveBeenNthCalledWith(
+      1,
+      `${baseUrl}/release-binding?namespaceName=dev&bindingName=my-binding`,
+    );
+  });
+
+  it('rejects env changes on a ResourceReleaseBinding without calling the API', async () => {
+    await expect(
+      applyResourceChange({
+        backendBaseUrl: baseUrl,
+        fetchApi: mockFetchApi as any,
+        namespaceName,
+        change: {
+          target_kind: 'ResourceReleaseBinding',
+          release_binding: 'pg-development',
+          env: [{ key: 'FOO', value: 'bar' }],
+        },
+      }),
+    ).rejects.toThrow('support only field updates');
+
+    expect(mockFetchApi.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyJsonPointer target kind allowlist
+// ---------------------------------------------------------------------------
+
+describe('applyJsonPointer prototype pollution', () => {
+  afterEach(() => {
+    delete (Object.prototype as any).polluted;
+    delete (Object.prototype as any).toString2;
+  });
+
+  it.each(['__proto__', 'prototype', 'constructor'])(
+    'rejects %s as a pointer segment',
+    segment => {
+      expect(() =>
+        applyJsonPointer(
+          {},
+          `/spec/componentTypeEnvironmentConfigs/${segment}/polluted`,
+          'PWNED',
+          'ReleaseBinding',
+        ),
+      ).toThrow('Invalid pointer');
+    },
+  );
+
+  it('does not pollute Object.prototype via __proto__', () => {
+    expect(() =>
+      applyJsonPointer(
+        { spec: {} },
+        '/spec/componentTypeEnvironmentConfigs/__proto__/polluted',
+        'PWNED',
+        'ReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+
+    expect(({} as any).polluted).toBeUndefined();
+  });
+
+  it('rejects an unsafe segment as the final key', () => {
+    expect(() =>
+      applyJsonPointer(
+        { spec: {} },
+        '/spec/componentTypeEnvironmentConfigs/__proto__',
+        'PWNED',
+        'ReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+  });
+
+  it('rejects unsafe segments for ResourceReleaseBinding too', () => {
+    expect(() =>
+      applyJsonPointer(
+        { spec: {} },
+        '/spec/resourceTypeEnvironmentConfigs/__proto__/polluted',
+        'PWNED',
+        'ResourceReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+
+    expect(({} as any).polluted).toBeUndefined();
+  });
+
+  it('still allows ordinary nested field paths', () => {
+    const doc: any = { spec: {} };
+    applyJsonPointer(
+      doc,
+      '/spec/componentTypeEnvironmentConfigs/resources/requests/cpu',
+      '50m',
+      'ReleaseBinding',
+    );
+    expect(
+      doc.spec.componentTypeEnvironmentConfigs.resources.requests.cpu,
+    ).toBe('50m');
+  });
+});
+
+describe('applyJsonPointer target kinds', () => {
+  it('allows resourceTypeEnvironmentConfigs only for ResourceReleaseBinding', () => {
+    const doc: any = {};
+    applyJsonPointer(
+      doc,
+      '/spec/resourceTypeEnvironmentConfigs/memory',
+      '256Mi',
+      'ResourceReleaseBinding',
+    );
+    expect(doc.spec.resourceTypeEnvironmentConfigs.memory).toBe('256Mi');
+
+    expect(() =>
+      applyJsonPointer(
+        {},
+        '/spec/resourceTypeEnvironmentConfigs/memory',
+        '256Mi',
+        'ReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+  });
+
+  it('rejects component override categories for ResourceReleaseBinding', () => {
+    expect(() =>
+      applyJsonPointer(
+        {},
+        '/spec/componentTypeEnvironmentConfigs/replicas',
+        2,
+        'ResourceReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+
+    expect(() =>
+      applyJsonPointer(
+        {},
+        '/spec/workloadOverrides/container/replicas',
+        2,
+        'ResourceReleaseBinding',
+      ),
+    ).toThrow('Invalid pointer');
+  });
+});
+
+describe('target kind resolution', () => {
+  it('treats a missing kind as a component binding', () => {
+    expect(tryResolveTargetKind({})).toBe('ReleaseBinding');
+    expect(tryResolveTargetKind({ target_kind: null })).toBe('ReleaseBinding');
+  });
+
+  it('passes through both known kinds', () => {
+    expect(tryResolveTargetKind({ target_kind: 'ReleaseBinding' })).toBe(
+      'ReleaseBinding',
+    );
+    expect(
+      tryResolveTargetKind({ target_kind: 'ResourceReleaseBinding' }),
+    ).toBe('ResourceReleaseBinding');
+  });
+
+  it('returns null rather than throwing for a kind it cannot route', () => {
+    expect(tryResolveTargetKind({ target_kind: 'ProjectReleaseBinding' })).toBe(
+      null,
+    );
+  });
+
+  it('still throws on the apply path so a bad kind is never misrouted', () => {
+    expect(() =>
+      resolveTargetKind({ target_kind: 'ProjectReleaseBinding' }),
+    ).toThrow('Unsupported target_kind');
   });
 });

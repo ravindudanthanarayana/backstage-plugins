@@ -1,5 +1,93 @@
 # @openchoreo/backstage-plugin-openchoreo-portal-assistant
 
+## 2.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [1cec15b]
+  - @openchoreo/backstage-plugin@2.0.0-next.2
+  - @openchoreo/backstage-plugin-openchoreo-ci@2.0.0-next.2
+  - @openchoreo/backstage-plugin-openchoreo-observability@2.0.0-next.2
+  - @openchoreo/backstage-plugin-common@2.0.0-next.2
+  - @openchoreo/backstage-plugin-react@2.0.0-next.2
+
+## 1.4.0-m.1
+
+### Patch Changes
+
+- Updated dependencies [d19949b]
+- Updated dependencies [92134d1]
+- Updated dependencies [a9b2476]
+- Updated dependencies [ac1813b]
+- Updated dependencies [127f3d0]
+- Updated dependencies [c15ee42]
+- Updated dependencies [9e3a840]
+- Updated dependencies [f5ca212]
+- Updated dependencies [f5ca212]
+- Updated dependencies [44795b9]
+- Updated dependencies [c67978a]
+- Updated dependencies [14f0837]
+- Updated dependencies [11907a6]
+- Updated dependencies [cdc4c6e]
+- Updated dependencies [3275f94]
+  - @openchoreo/backstage-plugin@2.0.0-next.0
+  - @openchoreo/backstage-plugin-openchoreo-observability@2.0.0-next.0
+  - @openchoreo/backstage-plugin-common@2.0.0-next.0
+  - @openchoreo/backstage-plugin-react@2.0.0-next.0
+  - @openchoreo/backstage-plugin-openchoreo-ci@2.0.0-next.0
+
+## 1.3.0
+
+### Patch Changes
+
+- Updated dependencies [4c7f96c]
+- Updated dependencies [67ba0da]
+- Updated dependencies [202d582]
+- Updated dependencies [45caff4]
+- Updated dependencies [a958b80]
+- Updated dependencies [2564efb]
+- Updated dependencies [c2acee5]
+- Updated dependencies [67ba0da]
+- Updated dependencies [67ba0da]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [762b22a]
+- Updated dependencies [0a7d538]
+- Updated dependencies [36f0982]
+- Updated dependencies [d7f12e6]
+- Updated dependencies [cc2fe12]
+- Updated dependencies [23f804a]
+- Updated dependencies [0c85b6b]
+  - @openchoreo/backstage-plugin-common@1.3.0
+  - @openchoreo/backstage-plugin-react@1.3.0
+  - @openchoreo/backstage-plugin@1.3.0
+  - @openchoreo/backstage-plugin-openchoreo-ci@1.3.0
+
+## 1.3.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [4c7f96c]
+- Updated dependencies [67ba0da]
+- Updated dependencies [202d582]
+- Updated dependencies [45caff4]
+- Updated dependencies [a958b80]
+- Updated dependencies [2564efb]
+- Updated dependencies [c2acee5]
+- Updated dependencies [67ba0da]
+- Updated dependencies [67ba0da]
+- Updated dependencies [ce31a0e]
+- Updated dependencies [762b22a]
+- Updated dependencies [0a7d538]
+- Updated dependencies [36f0982]
+- Updated dependencies [d7f12e6]
+- Updated dependencies [cc2fe12]
+- Updated dependencies [23f804a]
+- Updated dependencies [0c85b6b]
+  - @openchoreo/backstage-plugin-common@1.3.0-next.0
+  - @openchoreo/backstage-plugin-react@1.3.0-next.0
+  - @openchoreo/backstage-plugin@1.3.0-next.0
+  - @openchoreo/backstage-plugin-openchoreo-ci@1.3.0-next.0
+
 ## 2.0.0
 
 ### Major Changes

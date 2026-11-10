@@ -18,7 +18,6 @@ function createMockServices() {
   return {
     environmentInfoService: {
       fetchDeploymentInfo: jest.fn(),
-      promoteComponent: jest.fn(),
       deleteReleaseBinding: jest.fn(),
       updateComponentBinding: jest.fn(),
       rolloutRestartReleaseBinding: jest.fn(),
@@ -257,54 +256,6 @@ describe('createRouter', () => {
     });
   });
 
-  describe('POST /promote-deployment', () => {
-    it('should promote a deployment on success', async () => {
-      const mockResult = { success: true };
-      services.environmentInfoService.promoteComponent.mockResolvedValue(
-        mockResult,
-      );
-
-      const response = await request(app).post('/promote-deployment').send({
-        sourceEnv: 'dev',
-        targetEnv: 'prod',
-        componentName: 'my-component',
-        projectName: 'my-project',
-        namespaceName: 'my-namespace',
-      });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual(mockResult);
-      expect(
-        services.environmentInfoService.promoteComponent,
-      ).toHaveBeenCalledWith(
-        {
-          sourceEnvironment: 'dev',
-          targetEnvironment: 'prod',
-          componentName: 'my-component',
-          projectName: 'my-project',
-          namespaceName: 'my-namespace',
-        },
-        'mock-user-token',
-      );
-    });
-
-    it('should return 400 when required body fields are missing', async () => {
-      const response = await request(app).post('/promote-deployment').send({
-        sourceEnv: 'dev',
-        targetEnv: 'prod',
-      });
-
-      expect(response.status).toBe(400);
-      expect(response.body).toMatchObject({
-        error: expect.objectContaining({
-          message: expect.stringContaining(
-            'sourceEnv, targetEnv, componentName, projectName and namespaceName are required',
-          ),
-        }),
-      });
-    });
-  });
-
   describe('GET /builds', () => {
     it('should return builds on success', async () => {
       const mockBuilds = {
@@ -327,6 +278,45 @@ describe('createRouter', () => {
         'my-namespace',
         'my-project',
         'my-component',
+        undefined,
+        'mock-user-token',
+      );
+    });
+
+    it('passes the release line of the request', async () => {
+      services.buildInfoService.fetchBuilds.mockResolvedValue([]);
+
+      await request(app).get('/builds').query({
+        componentName: 'my-component',
+        projectName: 'my-project',
+        namespaceName: 'my-namespace',
+        releaseLine: 'next',
+      });
+
+      expect(services.buildInfoService.fetchBuilds).toHaveBeenCalledWith(
+        'my-namespace',
+        'my-project',
+        'my-component',
+        'next',
+        'mock-user-token',
+      );
+    });
+
+    it('leaves the main line out of the request', async () => {
+      services.buildInfoService.fetchBuilds.mockResolvedValue([]);
+
+      await request(app).get('/builds').query({
+        componentName: 'my-component',
+        projectName: 'my-project',
+        namespaceName: 'my-namespace',
+        releaseLine: 'main',
+      });
+
+      expect(services.buildInfoService.fetchBuilds).toHaveBeenCalledWith(
+        'my-namespace',
+        'my-project',
+        'my-component',
+        undefined,
         'mock-user-token',
       );
     });
@@ -382,6 +372,26 @@ describe('createRouter', () => {
             'componentName, projectName and namespaceName are required',
           ),
         }),
+      });
+    });
+  });
+
+  describe('POST /release-lines', () => {
+    it.each([
+      ['main', 'main is the implicit line of every component'],
+      ['default', "default is reserved, the component's implicit line is main"],
+    ])('rejects a line named %s', async (name, message) => {
+      const response = await request(app)
+        .post('/release-lines')
+        .send({
+          componentName: 'my-component',
+          namespaceName: 'my-namespace',
+          releaseLine: { metadata: { name } },
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: expect.objectContaining({ message }),
       });
     });
   });
@@ -658,6 +668,24 @@ describe('createRouter', () => {
         'targetPlane.kind must be one of',
       );
     });
+
+    it.each(['ObservabilityPlane', 'ClusterObservabilityPlane'])(
+      'accepts %s as targetPlane.kind',
+      async kind => {
+        services.secretsService.createSecret.mockResolvedValue({
+          name: 's1',
+          namespace: 'ns',
+          keys: ['k'],
+        });
+
+        const response = await request(app)
+          .post('/secrets')
+          .query({ namespaceName: 'ns' })
+          .send({ ...validBody, targetPlane: { kind, name: 'default' } });
+
+        expect(response.status).toBe(201);
+      },
+    );
 
     it('rejects when data is not an object', async () => {
       const response = await request(app)
@@ -1715,11 +1743,46 @@ describe('createRouter', () => {
           environmentName: 'dev',
           projectName: 'proj',
           componentName: 'svc',
+          releaseLine: undefined,
+          allReleaseLines: false,
         },
         'mock-user-token',
         expect.any(AbortSignal),
       );
     });
+
+    it.each([
+      [{ releaseLine: 'canary' }, 'canary', false],
+      [{ releaseLine: 'main' }, undefined, false],
+      [{ allReleaseLines: 'true' }, undefined, true],
+    ])(
+      'passes the release line scope %o through to the service',
+      async (scope, releaseLine, allReleaseLines) => {
+        services.wirelogsInfoService.openStream.mockResolvedValue(
+          makeUpstream([]),
+        );
+
+        await request(app)
+          .get('/wirelogs/stream')
+          .query({
+            namespaceName: 'ns',
+            environmentName: 'dev',
+            projectName: 'proj',
+            componentName: 'svc',
+            ...scope,
+          });
+
+        expect(services.wirelogsInfoService.openStream).toHaveBeenCalledWith(
+          expect.objectContaining({
+            componentName: 'svc',
+            releaseLine,
+            allReleaseLines,
+          }),
+          'mock-user-token',
+          expect.any(AbortSignal),
+        );
+      },
+    );
 
     it('writes an SSE error frame when openStream rejects', async () => {
       services.wirelogsInfoService.openStream.mockRejectedValue(

@@ -21,6 +21,157 @@ app:
   # For local k3d: http://openchoreo.localhost (set via https://github.com/openchoreo/openchoreo install/dev/openchoreo-values.yaml)
   # For production: external ingress URL (set via https://github.com/openchoreo/openchoreo install/helm/openchoreo/values.yaml backstage.baseUrl)
   baseUrl: ${BACKSTAGE_BASE_URL}
+  # Support links behind the Support button in the Catalog, APIs and Create
+  # page headers. The button renders only when this block is set, so leaving
+  # it out (the default) keeps those headers as they are.
+  # support:
+  #   url: https://github.com/openchoreo/openchoreo/issues
+  #   items:
+  #     - title: Issue tracker
+  #       icon: github
+  #       links:
+  #         - url: https://github.com/openchoreo/openchoreo/issues
+  #           title: Report a problem
+  # Frontend feature discovery, and the whole of this portal's composition.
+  # Installs any dependency of `packages/app` whose `backstage.role` is
+  # frontend-plugin/frontend-plugin-module and whose root or `./alpha` entry
+  # point default-exports a frontend feature. These dependencies qualify:
+  #
+  #   @openchoreo/backstage-portal-app  the portal shell — its `./alpha`
+  #                                     default export is a feature loader
+  #                                     carrying ~24 features in a fixed order
+  #   @backstage-community/plugin-tech-insights-maturity
+  #                                     the maturity API the Scorecards views
+  #                                     read; its own views are turned off
+  #                                     under `extensions` below
+  # portal-template:strip-start
+  #   ...-openchoreo-portal-assistant   the private Portal Assistant, which the
+  #                                     published shell must not depend on
+  #   ...-tech-insights-scorecards      Scorecards, shown as turned off unless
+  #                                     techInsights.scorecards.enabled is on
+  # portal-template:strip-end
+  #
+  # So `packages/app/src/App.tsx` has no `features` array, and adding a plugin
+  # to a portal is just adding the dependency.
+  #
+  # Scope: only the app package's own *direct* dependencies are scanned, and
+  # only the *default* export of each entry point is read — a named export is
+  # never picked up on its own. The portal's ~24 features are not discovered
+  # individually; they arrive through the shell's loader, which is what keeps
+  # their order (and the plugin-scoped `withOverrides`) ours to declare rather
+  # than a side effect of dependency-name sort order.
+  #
+  # Needed in BOTH this file and app-config.production.yaml, because the two
+  # halves of discovery read different configs:
+  #
+  #   build time  the CLI reads this file to generate the module that sets
+  #               `window['__@backstage/discovered__']`. The production image
+  #               builds the frontend from this file (Dockerfile stage 1,
+  #               before app-config.production.yaml is copied over it).
+  #   run time    `discoverAvailableFeatures` re-reads `app.packages` and
+  #               returns nothing if it is unset. Under Rspack the build-time
+  #               config is NOT inlined (`process.env.APP_CONFIG` is `[]`);
+  #               app-backend injects the config it loaded, which in the image
+  #               is app-config.production.yaml.
+  #
+  # Set it in only one of the two and the portal renders empty in that half,
+  # with no error — App.tsx has no `features` array to fall back on.
+  packages: all
+  # Tab groups + order for the canonical entity page.
+  pages:
+    entity:
+      config:
+        defaultContentOrder: natural
+        groups:
+          - overview: { title: Overview }
+          - definition: { title: Definition }
+          - deployment: { title: Deployment, contentOrder: natural }
+          - runtime: { title: Runtime, contentOrder: natural }
+          - analysis: { title: Analysis, contentOrder: natural }
+          - external: { title: External }
+  # Suppress upstream cards that duplicate OC layouts + default themes so
+  # our openchoreo-* themes win the theme picker.
+  extensions:
+    # Tab order of the Platform section. Extensions named here are ordered ahead of
+    # the rest, in this order, so Overview stays the first tab — which is also where
+    # `/platform-overview` redirects to. Without this the order would depend on the
+    # `portalFeatures` order in the shell's feature loader.
+    - sub-page:platform-engineer-core/overview
+    - sub-page:openchoreo-observability/platform-logs
+    # Serve the composable home at `/` and trim built-in home widgets
+    # (Starred Entities is kept; the rest are replaced by OpenChoreo widgets).
+    - page:home:
+        config:
+          path: /
+    - home-page-widget:home/toolkit: false
+    - home-page-widget:home/random-joke: false
+    - home-page-widget:home/most-visited: false
+    - home-page-widget:home/recently-visited: false
+    - home-page-widget:home/world-clock: false
+    - theme:app/light: false
+    - theme:app/dark: false
+    # `page:kubernetes` is the plugin's standalone /kubernetes page — it
+    # calls useEntity() inside its router and throws when opened without
+    # an entity context. We only want the plugin's entity-page tab, not
+    # this broken top-level page.
+    - page:kubernetes: false
+    # Hide upstream /settings tabs we don't want; leaves General +
+    # OpenChoreo's Access Control / Secrets sub-pages.
+    - sub-page:user-settings/auth-providers: false
+    - sub-page:user-settings/feature-flags: false
+    - entity-card:catalog/about: false
+    - entity-card:catalog/links: false
+    - entity-card:catalog/labels: false
+    - entity-card:catalog/depends-on-components: false
+    - entity-card:catalog/depends-on-resources: false
+    - entity-card:catalog/has-subcomponents: false
+    - entity-card:catalog/has-components: false
+    - entity-card:catalog/has-resources: false
+    - entity-card:catalog-graph/relations: false
+    - entity-card:api-docs/provided-apis: false
+    - entity-card:api-docs/consumed-apis: false
+    - entity-card:api-docs/has-apis: false
+    # ApiDefinitionCard already lives on the Definition tab; hide the
+    # standalone card on API Overview to avoid duplication.
+    - entity-card:api-docs/definition: false
+    # Providers/Consumers rendered directly by ApiOverviewLayout, so
+    # suppress the auto-contributed cards to prevent duplicates in
+    # ForeignCardsSection.
+    - entity-card:api-docs/providing-components: false
+    - entity-card:api-docs/consuming-components: false
+    # GitLab cards throw when GitLab annotations are absent.
+    - entity-card:gitlab/readme: false
+    - entity-card:gitlab/coverage: false
+    - entity-card:gitlab/releases: false
+    - entity-card:gitlab/merge-requests-stats: false
+    - entity-card:gitlab/people: false
+    - entity-card:gitlab/languages: false
+    # tech-insights-maturity is installed only for its API; the
+    # tech-insights-scorecards page and entity tab replace its own views.
+    - page:tech-insights-maturity: false
+    - entity-content:tech-insights-maturity/maturity: false
+    - entity-content:tech-insights-maturity/summary: false
+    - entity-card:tech-insights-maturity/maturity-summary: false
+    # Scores are on the Scorecards tab, not the Overview tab.
+    - entity-card:tech-insights-scorecards/summary: false
+    # The `scorecards` tab group isn't in the portal's GROUP_ORDER, so the tab
+    # sorts after the OpenChoreo tabs.
+    - entity-content:tech-insights-scorecards:
+        config:
+          group: scorecards
+          # The plugin's default kinds plus the OpenChoreo kinds that
+          # collectors report facts for.
+          filter:
+            kind:
+              $in:
+                - Component
+                - API
+                - Resource
+                - System
+                - Domain
+                - Group
+                - ClusterComponentType
+                - ComponentType
 
 organization:
   name: OpenChoreo
@@ -178,6 +329,7 @@ openchoreo:
   # Required by Backstage schema validation. Custom OpenChoreo kinds don't use owner.
   defaultOwner: 'openchoreo-users'
 
+  # portal-template:strip-start
   # Upstream URL the openchoreo-portal-assistant-backend plugin forwards
   # to (Portal Assistant). Env-var-gated: when OPENCHOREO_PORTAL_ASSISTANT_URL
   # is unset, Backstage substitutes the placeholder as undefined and the
@@ -190,6 +342,7 @@ openchoreo:
   # For in-cluster Backstage: http://portal-assistant.openchoreo-control-plane.svc.cluster.local:8080
   # For external access: configure via OPENCHOREO_PORTAL_ASSISTANT_URL env var.
   portalAssistantUrl: ${OPENCHOREO_PORTAL_ASSISTANT_URL}
+  # portal-template:strip-end
 
   schedule:
     frequency: 300 # seconds between runs (default: 300, the periodic full sync acts as a safety net behind the event-forwarder's real-time deltas)
@@ -205,7 +358,7 @@ openchoreo:
 
   # Feature flags for enabling/disabling OpenChoreo functionality
   # These can be controlled via Helm values: backstage.features.*
-  # Environment variables: OPENCHOREO_FEATURES_WORKFLOWS_ENABLED, OPENCHOREO_FEATURES_OBSERVABILITY_ENABLED, OPENCHOREO_FEATURES_AUTH_ENABLED, OPENCHOREO_FEATURES_AUTHZ_ENABLED, OPENCHOREO_FEATURES_SECRET_MANAGEMENT_ENABLED
+  # Environment variables: OPENCHOREO_FEATURES_WORKFLOWS_ENABLED, OPENCHOREO_FEATURES_OBSERVABILITY_ENABLED, OPENCHOREO_FEATURES_AUTH_ENABLED, OPENCHOREO_FEATURES_AUTHZ_ENABLED, OPENCHOREO_FEATURES_SECRET_MANAGEMENT_ENABLED, OPENCHOREO_FEATURES_DELIVERY_INSIGHTS_ENABLED, OPENCHOREO_FEATURES_COST_INSIGHTS_ENABLED
   features:
     # Workflow plane / Workflows functionality
     # When disabled, hides Workflows tab and WorkflowsOverviewCard from entity pages
@@ -230,11 +383,22 @@ openchoreo:
     secretManagement:
       enabled: ${OPENCHOREO_FEATURES_SECRET_MANAGEMENT_ENABLED}
     # OpenChoreo Assistant chat agent (FAB, drawer, contextual launchers)
-    # Opt-in: defaults to false. Requires the perch-agent service and an
+    # Opt-in: defaults to false. Requires the portal-assistant service and an
     # LLM API key Secret to be deployed. When disabled, hides the chat tab,
     # FailedBuildSnackbar, and the build / logs / component-create launchers.
     assistant:
       enabled: ${OPENCHOREO_FEATURES_ASSISTANT_ENABLED}
+    # Delivery Insights (DORA metrics) page
+    # Opt-in: defaults to false. Feature preview, and separate from the Observer
+    # flag that collects the data (observer.deliveryInsights.enabled on the
+    # observability plane) -- both are needed for the page to show anything.
+    # When disabled, hides the Delivery Insights sidebar item.
+    deliveryInsights:
+      enabled: ${OPENCHOREO_FEATURES_DELIVERY_INSIGHTS_ENABLED}
+    # Cost insights shown in summary cards in catalog overview pages and the insights
+    # tab in the cost insights page
+    costInsights:
+      enabled: ${OPENCHOREO_FEATURES_COST_INSIGHTS_ENABLED}
 
   # Component Type Mappings (optional - defaults provided)
   # Maps OpenChoreo component types to Backstage page variants
@@ -377,3 +541,23 @@ events:
 permission:
   # setting this to `false` will disable permissions
   enabled: true
+
+# Tech Insights — scorecards/checks against catalog entities.
+techInsights:
+  # No factChecker.checks: checks are stored by
+  # tech-insights-backend-module-dynamic-checks and managed on the
+  # Scorecards page.
+  scorecards:
+    # The Tech Insights backend, fact collectors and checks, and the
+    # Scorecards page, sidebar item and entity tab. The plugin is on when this
+    # is unset, so the default keeps OpenChoreo opt-in.
+    # Environment variable: OPENCHOREO_FEATURES_SCORECARDS_ENABLED
+    enabled: ${OPENCHOREO_FEATURES_SCORECARDS_ENABLED:-false}
+    kindLabels:
+      System: Project
+      Domain: Namespace
+    entityLabel:
+      singular: resource
+      plural: resources
+    # Suggested in the check editor, which also accepts new ones.
+    categories: [Security, Reliability, Documentation]

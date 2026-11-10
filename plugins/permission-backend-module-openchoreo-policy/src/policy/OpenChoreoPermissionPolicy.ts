@@ -23,10 +23,15 @@ import {
   openchoreoConditions,
   createOpenChoreoConditionalDecision,
   matchesCatalogEntityCapability,
+  encodeKindCapabilities,
 } from '../rules';
-import { hasUncoveredAllowedPath } from '../utils/pathUtils';
+import { collapsePaths, hasUncoveredAllowedPath } from '../utils/pathUtils';
 import { isConstrained, resolveCapability } from '../utils/capabilityLookup';
 import type { CapabilityResource } from '@openchoreo/backstage-plugin-common';
+import {
+  dynamicCheckManagePermission,
+  dynamicCheckReadPermission,
+} from '@openchoreo/backstage-plugin-tech-insights-dynamic-checks-common';
 
 // converts capability entries to their paths, filters out entries without paths
 function extractPaths(entries: CapabilityResource[] | undefined): string[] {
@@ -46,6 +51,21 @@ const PERMISSION_PREFIX = 'openchoreo.';
 
 /** Permission name prefix for catalog entity permissions */
 const CATALOG_PERMISSION_PREFIX = 'catalog.entity.';
+
+/**
+ * Check-management permissions from the tech-insights dynamic-checks module,
+ * mapped by exact name: upstream's own `tech-insights.*` permissions (reading
+ * and running checks, which every entity's scorecard tab needs) must keep
+ * falling through to the allow-all default.
+ *
+ * The control plane's authz profile only returns actions it has registered,
+ * even for a `*` role, so against a control plane without the scorecards
+ * actions both permissions are denied.
+ */
+const TECH_INSIGHTS_PERMISSION_TO_ACTION: Record<string, string> = {
+  [dynamicCheckReadPermission.name]: 'scorecards:view',
+  [dynamicCheckManagePermission.name]: 'scorecards:manage',
+};
 
 /** Condition factory for catalog entity capability rule */
 const catalogConditions = {
@@ -109,6 +129,9 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
    * For scaffolder.task.create:
    * - Returns ALLOW if user has component:create capability for any scope
    *
+   * For tech-insights check-management permissions (dynamic checks):
+   * - Returns ALLOW/DENY on the mapped OpenChoreo action
+   *
    * For non-OpenChoreo permissions, returns ALLOW to defer to other policies.
    */
   async handle(
@@ -127,6 +150,16 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
     // Handle catalog.entity.* permissions for OpenChoreo-managed entities
     if (permission.name.startsWith(CATALOG_PERMISSION_PREFIX)) {
       return this.handleCatalogPermission(request, user);
+    }
+
+    const techInsightsAction =
+      TECH_INSIGHTS_PERMISSION_TO_ACTION[permission.name];
+    if (techInsightsAction) {
+      return this.handleClusterAction(
+        permission.name,
+        techInsightsAction,
+        user,
+      );
     }
 
     // Only handle OpenChoreo permissions
@@ -214,6 +247,52 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
   }
 
   /**
+   * Allows a basic permission when the user holds `action` anywhere not fully
+   * covered by an unconstrained deny, the same test as OpenChoreo basic
+   * permissions. Used for permissions whose subject (such as a compliance
+   * check) applies across the whole portal rather than to one namespace.
+   */
+  private async handleClusterAction(
+    permissionName: string,
+    action: string,
+    user?: PolicyQueryUser,
+  ): Promise<PolicyDecision> {
+    const userEntityRef = user?.info?.userEntityRef;
+    if (!userEntityRef) {
+      this.logger.debug(`Denying ${permissionName} - no user context`);
+      return { result: AuthorizeResult.DENY };
+    }
+
+    try {
+      const capabilities = await this.authzService.getCapabilitiesForUser(
+        userEntityRef,
+        getUserTokenFromContext(),
+      );
+      const actionCapability = resolveCapability(
+        capabilities.capabilities,
+        action,
+      );
+      const isAllowed = hasUncoveredAllowedPath(
+        extractPaths(actionCapability?.allowed),
+        unconstrainedPaths(actionCapability?.denied),
+      );
+
+      this.logger.debug(
+        `${permissionName} (${action}): ${isAllowed ? 'ALLOW' : 'DENY'}`,
+      );
+      return {
+        result: isAllowed ? AuthorizeResult.ALLOW : AuthorizeResult.DENY,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error evaluating permission ${permissionName}`,
+        error as Error,
+      );
+      return { result: AuthorizeResult.DENY };
+    }
+  }
+
+  /**
    * Maps a Backstage permission name to an OpenChoreo action.
    */
   private mapPermissionToAction(permissionName: string): string | undefined {
@@ -282,7 +361,7 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
       // Each kind maps to a different OpenChoreo action
       const kindCapabilities: Record<
         string,
-        { action: string; allowedPaths: string[]; deniedPaths: string[] }
+        { allowedPaths: string[]; deniedPaths: string[] }
       > = {};
 
       for (const kind of OPENCHOREO_MANAGED_ENTITY_KINDS) {
@@ -305,11 +384,21 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
         // Catalog visibility has no environment context, so we cannot satisfy
         // ABAC CEL expressions here. Drop constrained entries — entity-level
         // actions are gated separately by matchesCapability + env-aware hooks.
-        const allowedPaths = unconstrainedPaths(actionCapability?.allowed);
-        const deniedPaths = unconstrainedPaths(actionCapability?.denied);
+        //
+        // Collapse paths implied by a broader path in the same list. A user
+        // holding a project-scoped role in every project they belong to
+        // otherwise repeats one path per project on all ~24 managed kinds, and
+        // the whole structure is echoed once per authorized resource in the
+        // batched apply-conditions request — which the catalog parses with a
+        // non-configurable 100 KB body limit.
+        const allowedPaths = collapsePaths(
+          unconstrainedPaths(actionCapability?.allowed),
+        );
+        const deniedPaths = collapsePaths(
+          unconstrainedPaths(actionCapability?.denied),
+        );
 
         kindCapabilities[kindLower] = {
-          action,
           allowedPaths,
           deniedPaths,
         };
@@ -321,17 +410,11 @@ export class OpenChoreoPermissionPolicy implements PermissionPolicy {
         );
       }
 
-      // Log the kindCapabilities for debugging
-      this.logger.info(
-        `[CATALOG_PERMISSION] kindCapabilities for ${userEntityRef}: ${JSON.stringify(
-          kindCapabilities,
-        )}`,
-      );
-
-      // Serialize kindCapabilities to JSON (Backstage rules only support primitives)
+      // Serialize kindCapabilities (Backstage rules only support primitives).
+      // `kinds` is omitted deliberately: the rule defaults to the managed-kind
+      // list, so there is no need to repeat ~24 kind names in every condition.
       const conditions = catalogConditions.matchesCatalogEntityCapability({
-        kindCapabilitiesJson: JSON.stringify(kindCapabilities),
-        kinds: OPENCHOREO_MANAGED_ENTITY_KINDS,
+        kindCapabilitiesJson: encodeKindCapabilities(kindCapabilities),
       });
 
       this.logger.debug(

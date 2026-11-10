@@ -17,16 +17,25 @@ import {
   RefreshOverlay,
 } from '@openchoreo/backstage-design-system';
 import { CHOREO_ANNOTATIONS } from '@openchoreo/backstage-plugin-common';
+import {
+  TimeRangeFilter,
+  useCostInsightsEnabled,
+} from '@openchoreo/backstage-plugin-react';
 import { parseUrlTimeRange, writeUrlTimeRange } from '../../utils/urlTimeRange';
 import { CostInsightsScopeFilters } from './CostInsightsScopeFilters';
+import {
+  componentValue,
+  projectValue,
+  useResolvedScopeSelection,
+} from './useCostScopeOptions';
 import { expandSelection } from './costAggregation';
 import {
   CostInsightsFilters,
   DEFAULT_GRANULARITY,
 } from './CostInsightsFilters';
-import { CostSummaryCards } from './CostSummaryCards';
 import { CostInsightsTable } from './CostInsightsTable';
 import { CostInsightsGraphs } from './CostInsightsGraphs';
+import { ForecastDivergenceChart } from './ForecastDivergenceChart';
 import { useNamespaceEnvironments } from './useNamespaceEnvironments';
 import { useDimensionTitles } from './useDimensionTitles';
 import { useCostInsights } from './useCostInsights';
@@ -34,8 +43,8 @@ import type {
   CostComponentRef,
   CostProjectRef,
   CostScopeSelection,
-  CostViewMode,
 } from './types';
+import { ReleaseLineFilter } from '../common';
 
 // Cost Analysis is a heavier feature (report views, FinOps chat). Load it lazily
 // so it only enters the bundle when the Cost Analysis tab is opened.
@@ -43,8 +52,7 @@ const CostAnalysisPage = lazy(() =>
   import('../CostAnalysis').then(m => ({ default: m.CostAnalysisPage })),
 );
 
-const DEFAULT_NAMESPACE = 'default';
-const COST_DEFAULT_TIME_RANGE = '1h';
+const COST_DEFAULT_TIME_RANGE = '24h';
 const COST_INSIGHTS_PATH = '/cost-insights';
 
 // The catalog kind each table row maps to, so we reuse the app's registered
@@ -57,6 +65,12 @@ const LEVEL_KIND: Record<string, string> = {
 
 const useStyles = makeStyles(theme => ({
   section: { marginTop: theme.spacing(2) },
+  timeRangeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: theme.spacing(1),
+  },
   analysisContent: { marginTop: theme.spacing(3) },
   tabBar: {
     display: 'flex',
@@ -81,15 +95,19 @@ const useStyles = makeStyles(theme => ({
   },
 }));
 
-const projectValue = (p: CostProjectRef) => `${p.namespace}/${p.name}`;
-const componentValue = (c: CostComponentRef) =>
-  `${c.namespace}/${c.project}/${c.name}`;
+// The API's component-scoped "not enabled" message is wrong for this
+// platform-level feature.
+function friendlyCostError(message: string): string {
+  return /observability is not enabled/i.test(message)
+    ? 'Cost Insights have not been enabled'
+    : message;
+}
 
 /**
  * Parse the multi-select scope from the URL. Reads the plural params
  * (`namespaces`/`projects`/`components`) and falls back to the legacy singular
  * params (`namespace`/`project`/`component`) so existing deep links still land
- * on the right scope. An absent namespace defaults to `default`.
+ * on the right scope. An empty tier means every item in it.
  */
 function parseSelection(params: URLSearchParams): CostScopeSelection {
   const nsRaw = params.get('namespaces');
@@ -97,7 +115,7 @@ function parseSelection(params: URLSearchParams): CostScopeSelection {
   let namespaces: string[];
   if (nsRaw !== null) namespaces = nsRaw.split(',').filter(Boolean);
   else if (legacyNs) namespaces = [legacyNs];
-  else namespaces = [DEFAULT_NAMESPACE];
+  else namespaces = [];
 
   const projRaw = params.get('projects');
   const legacyProj = params.get('project');
@@ -147,7 +165,11 @@ function writeSelection(params: URLSearchParams, sel: CostScopeSelection) {
   params.delete('namespace');
   params.delete('project');
   params.delete('component');
-  params.set('namespaces', sel.namespaces.join(','));
+  if (sel.namespaces.length) {
+    params.set('namespaces', sel.namespaces.join(','));
+  } else {
+    params.delete('namespaces');
+  }
   if (sel.projects.length) {
     params.set('projects', sel.projects.map(projectValue).join(','));
   } else {
@@ -200,12 +222,16 @@ const CostInsightsInsightsTab = () => {
   const app = useApp();
   const { selection, update, searchParams } = useCostSelection();
 
-  const { level, scopes } = expandSelection(selection);
+  // Resolved against the catalog so the scope matches what the dropdowns show.
+  const { resolved, loading: scopeLoading } =
+    useResolvedScopeSelection(selection);
+  const { level, scopes: resolvedScopes } = expandSelection(resolved);
+  // A half-resolved selection would query the parent scope and be superseded
+  // the moment a child tier's options land, so hold until the scope settles.
+  const scopes = scopeLoading ? [] : resolvedScopes;
   // Raw dimension name to catalog title, so rows read "GCP Microservice Demo".
   const titles = useDimensionTitles(level, scopes);
 
-  const view: CostViewMode =
-    searchParams.get('view') === 'graph' ? 'graph' : 'table';
   const granularity = searchParams.get('granularity') || DEFAULT_GRANULARITY;
   const { timeRange, customStartTime, customEndTime } = parseUrlTimeRange(
     searchParams,
@@ -224,7 +250,7 @@ const CostInsightsInsightsTab = () => {
     environments,
     loading: envsLoading,
     error: envsError,
-  } = useNamespaceEnvironments(selection.namespaces);
+  } = useNamespaceEnvironments(resolved.namespaces);
 
   // Default to every environment until the user narrows the selection, so the
   // page shows aggregated data immediately.
@@ -249,15 +275,6 @@ const CostInsightsInsightsTab = () => {
       });
     },
     [update, allEnvNames.length],
-  );
-
-  const onViewChange = useCallback(
-    (nextView: CostViewMode) =>
-      update(params => {
-        if (nextView === 'table') params.delete('view');
-        else params.set('view', nextView);
-      }),
-    [update],
   );
 
   const onTimeRangeChange = useCallback(
@@ -289,7 +306,6 @@ const CostInsightsInsightsTab = () => {
     timeRange,
     customStartTime,
     customEndTime,
-    view,
     granularity,
   });
 
@@ -298,7 +314,7 @@ const CostInsightsInsightsTab = () => {
   const optimizeScope =
     level === 'component' && scopes.length === 1 ? scopes[0] : undefined;
 
-  const noScope = scopes.length === 0;
+  const noScope = !scopeLoading && scopes.length === 0;
   const noEnvironments =
     !noScope && !envsLoading && !envsError && environments.length === 0;
 
@@ -310,26 +326,27 @@ const CostInsightsInsightsTab = () => {
           environmentsLoading={envsLoading}
           selectedEnvironments={selectedEnvironments}
           onEnvironmentsChange={onEnvironmentsChange}
-          view={view}
-          onViewChange={onViewChange}
-          timeRange={timeRange}
-          customStartTime={customStartTime}
-          customEndTime={customEndTime}
-          onTimeRangeChange={onTimeRangeChange}
+          onRefresh={refresh}
+          refreshing={loading || isRefetching}
+          disabled={noScope}
+        />
+        <ReleaseLineFilter
+          namespace={optimizeScope?.namespace}
+          component={optimizeScope?.component}
         />
       </Box>
 
       {noScope && (
         <Box className={classes.section}>
           <Alert severity="info">
-            Select one or more namespaces to view cost insights.
+            No namespaces found to show cost insights for.
           </Alert>
         </Box>
       )}
 
       {envsError && (
         <Box className={classes.section}>
-          <Alert severity="error">{envsError}</Alert>
+          <Alert severity="error">{friendlyCostError(envsError)}</Alert>
         </Box>
       )}
 
@@ -354,40 +371,49 @@ const CostInsightsInsightsTab = () => {
 
       {error && (
         <Box className={classes.section}>
-          <Alert severity="error">{error}</Alert>
+          <Alert severity="error">{friendlyCostError(error)}</Alert>
         </Box>
       )}
 
-      {loading && <PageLoader />}
+      {(loading || scopeLoading) && <PageLoader />}
 
       {!loading && data && (
         <Box position="relative">
           <RefreshOverlay active={isRefetching} label="Refreshing cost data" />
-          {view !== 'graph' && (
-            <Box className={classes.section}>
-              <CostSummaryCards summary={data.summary} />
-            </Box>
-          )}
+          {/* Forecast covers the whole month, so it sits above the time range. */}
           <Box className={classes.section}>
-            {view === 'graph' ? (
-              <CostInsightsGraphs
-                data={data}
-                granularity={granularity}
-                onGranularityChange={onGranularityChange}
-              />
-            ) : (
-              <CostInsightsTable
-                level={data.level}
-                rows={data.rows}
-                icon={app.getSystemIcon(`kind:${LEVEL_KIND[data.level]}`)}
-                titles={titles}
-                scope={optimizeScope}
-                onOptimized={refresh}
-                singleComponent={
-                  data.level === 'component' && scopes.length === 1
-                }
-              />
-            )}
+            <ForecastDivergenceChart forecast={data.forecast} />
+          </Box>
+          <Box className={`${classes.section} ${classes.timeRangeRow}`}>
+            <Typography variant="body2" color="textSecondary">
+              Time range for everything below
+            </Typography>
+            <TimeRangeFilter
+              value={timeRange}
+              customStartTime={customStartTime}
+              customEndTime={customEndTime}
+              onChange={onTimeRangeChange}
+            />
+          </Box>
+          <Box className={classes.section}>
+            <CostInsightsGraphs
+              data={data}
+              granularity={granularity}
+              onGranularityChange={onGranularityChange}
+            />
+          </Box>
+          <Box className={classes.section}>
+            <CostInsightsTable
+              level={data.level}
+              rows={data.rows}
+              icon={app.getSystemIcon(`kind:${LEVEL_KIND[data.level]}`)}
+              titles={titles}
+              scope={optimizeScope}
+              onOptimized={refresh}
+              singleComponent={
+                data.level === 'component' && scopes.length === 1
+              }
+            />
           </Box>
         </Box>
       )}
@@ -409,9 +435,10 @@ const CostInsightsInsightsTab = () => {
 const CostAnalysisTab = () => {
   const classes = useStyles();
   const { selection } = useCostSelection();
+  const { resolved } = useResolvedScopeSelection(selection);
 
   const project =
-    selection.projects.length === 1 ? selection.projects[0] : undefined;
+    resolved.projects.length === 1 ? resolved.projects[0] : undefined;
 
   const syntheticEntity: Entity | undefined = useMemo(
     () =>
@@ -457,23 +484,31 @@ const CostAnalysisTab = () => {
 const CostInsightsTabBar = () => {
   const classes = useStyles();
   const location = useLocation();
-  const onCostAnalysis = location.pathname.endsWith('/cost-analysis');
+  const costInsightsEnabled = useCostInsightsEnabled();
+  const analysisPath = `${COST_INSIGHTS_PATH}/cost-analysis`;
+  // Gated off, the index renders Analysis Reports too, so it is always current.
+  const onCostAnalysis =
+    !costInsightsEnabled ||
+    location.pathname === analysisPath ||
+    location.pathname.startsWith(`${analysisPath}/`);
   const tabClass = (active: boolean) =>
     active ? `${classes.tab} ${classes.tabActive}` : classes.tab;
 
   return (
     <Box className={classes.tabBar} role="tablist">
-      <RouterLink
-        to={{ pathname: COST_INSIGHTS_PATH, search: location.search }}
-        className={tabClass(!onCostAnalysis)}
-        role="tab"
-        aria-selected={!onCostAnalysis}
-      >
-        Insights
-      </RouterLink>
+      {costInsightsEnabled && (
+        <RouterLink
+          to={{ pathname: COST_INSIGHTS_PATH, search: location.search }}
+          className={tabClass(!onCostAnalysis)}
+          role="tab"
+          aria-selected={!onCostAnalysis}
+        >
+          Insights
+        </RouterLink>
+      )}
       <RouterLink
         to={{
-          pathname: `${COST_INSIGHTS_PATH}/cost-analysis`,
+          pathname: analysisPath,
           search: location.search,
         }}
         className={tabClass(onCostAnalysis)}
@@ -488,6 +523,7 @@ const CostInsightsTabBar = () => {
 
 export const CostInsightsPage = () => {
   const { selection, setSelection } = useCostSelection();
+  const costInsightsEnabled = useCostInsightsEnabled();
 
   return (
     <Page themeId="tool">
@@ -499,8 +535,17 @@ export const CostInsightsPage = () => {
         />
         <CostInsightsTabBar />
         <Routes>
-          <Route index element={<CostInsightsInsightsTab />} />
-          <Route path="cost-analysis" element={<CostAnalysisTab />} />
+          <Route
+            index
+            element={
+              costInsightsEnabled ? (
+                <CostInsightsInsightsTab />
+              ) : (
+                <CostAnalysisTab />
+              )
+            }
+          />
+          <Route path="cost-analysis/*" element={<CostAnalysisTab />} />
         </Routes>
       </Content>
     </Page>

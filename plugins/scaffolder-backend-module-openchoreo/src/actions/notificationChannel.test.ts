@@ -50,6 +50,7 @@ const buildCtx = (overrides: any = {}) => ({
       smtpPasswordSecretKey: 'password',
       subjectTemplate: 'Alert: ${alertName}',
       bodyTemplate: 'Details: ${alertDescription}',
+      contentType: 'text/html',
     },
     ...overrides.input,
   },
@@ -93,12 +94,104 @@ describe('createNotificationChannelAction', () => {
     const body = mockPOST.mock.calls[0][1].body;
     expect(body.spec.type).toBe('email');
     expect(body.spec.environment).toBe('dev');
+    expect(body.spec.emailConfig.template.contentType).toBe('text/html');
     expect(body.spec.emailConfig.smtp.auth.username.secretKeyRef).toEqual({
       name: 'smtp-auth',
       key: 'username',
     });
     expect(ctx.output).toHaveBeenCalledWith('channelName', 'dev-email');
     expect(ctx.output).toHaveBeenCalledWith('namespaceName', 'my-ns');
+  });
+
+  it('passes the sender display name through when set', async () => {
+    mockPOST.mockResolvedValueOnce(successResponse());
+    const action = createNotificationChannelAction(
+      buildConfig(),
+      mockCatalog as any,
+    );
+    const ctx = buildCtx();
+    (ctx.input.emailConfig as any).fromName = '  Example Alerts  ';
+    await action.handler(ctx as any);
+
+    const body = mockPOST.mock.calls[0][1].body;
+    expect(body.spec.emailConfig.from).toBe('alerts@example.com');
+    expect(body.spec.emailConfig.fromName).toBe('Example Alerts');
+  });
+
+  it('omits the sender display name when it is empty', async () => {
+    mockPOST.mockResolvedValueOnce(successResponse());
+    const action = createNotificationChannelAction(
+      buildConfig(),
+      mockCatalog as any,
+    );
+    const ctx = buildCtx();
+    (ctx.input.emailConfig as any).fromName = '   ';
+    await action.handler(ctx as any);
+
+    const body = mockPOST.mock.calls[0][1].body;
+    expect(body.spec.emailConfig).not.toHaveProperty('fromName');
+  });
+
+  it('rejects a sender display name longer than 128 characters', async () => {
+    const action = createNotificationChannelAction(
+      buildConfig(),
+      mockCatalog as any,
+    );
+    const ctx = buildCtx();
+    (ctx.input.emailConfig as any).fromName = 'a'.repeat(129);
+
+    await expect(action.handler(ctx as any)).rejects.toThrow(
+      /fromName must be at most 128 characters/,
+    );
+    expect(mockPOST).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a line feed', 'Example\nAlerts'],
+    ['a carriage return', 'Example\rAlerts'],
+  ])(
+    'rejects a sender display name containing %s',
+    async (_label, fromName) => {
+      const action = createNotificationChannelAction(
+        buildConfig(),
+        mockCatalog as any,
+      );
+      const ctx = buildCtx();
+      (ctx.input.emailConfig as any).fromName = fromName;
+
+      await expect(action.handler(ctx as any)).rejects.toThrow(
+        /fromName must not contain line breaks/,
+      );
+      expect(mockPOST).not.toHaveBeenCalled();
+    },
+  );
+
+  it('measures the sender display name after trimming', async () => {
+    mockPOST.mockResolvedValueOnce(successResponse());
+    const action = createNotificationChannelAction(
+      buildConfig(),
+      mockCatalog as any,
+    );
+    const ctx = buildCtx();
+    (ctx.input.emailConfig as any).fromName = ` ${'a'.repeat(128)} `;
+    await action.handler(ctx as any);
+
+    const body = mockPOST.mock.calls[0][1].body;
+    expect(body.spec.emailConfig.fromName).toBe('a'.repeat(128));
+  });
+
+  it('defaults the email template content type to text/plain', async () => {
+    mockPOST.mockResolvedValueOnce(successResponse());
+    const action = createNotificationChannelAction(
+      buildConfig(),
+      mockCatalog as any,
+    );
+    const ctx = buildCtx();
+    delete (ctx.input.emailConfig as any).contentType;
+    await action.handler(ctx as any);
+
+    const body = mockPOST.mock.calls[0][1].body;
+    expect(body.spec.emailConfig.template.contentType).toBe('text/plain');
   });
 
   it('builds webhook config with secret-backed headers', async () => {

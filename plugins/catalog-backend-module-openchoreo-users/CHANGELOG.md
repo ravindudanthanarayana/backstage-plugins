@@ -1,5 +1,21 @@
 # @openchoreo/backstage-plugin-catalog-backend-module-openchoreo-users
 
+## 1.4.0-m.1
+
+### Patch Changes
+
+- c67978a: Replace Backstage CLI boilerplate in published package descriptions and READMEs with
+  real ones, so the npm listings describe what each package does and point at the install
+  guide. No code changes.
+- Updated dependencies [c67978a]
+  - @openchoreo/backstage-plugin-thunder-idp-client-node@2.0.0-next.0
+
+## 1.3.0
+
+### Patch Changes
+
+- @openchoreo/backstage-plugin-thunder-idp-client-node@1.3.0
+
 ## 1.2.0
 
 ### Patch Changes

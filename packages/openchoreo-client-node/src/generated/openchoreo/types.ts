@@ -110,6 +110,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1alpha1/metadata': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get platform metadata
+     * @description Returns how this OpenChoreo installation is configured, so clients can adapt
+     *     their behavior — for example, whether audit logs can be queried and which
+     *     observer serves them.
+     *
+     *     Requires authentication but no specific permission. The document grants no
+     *     access: querying audit logs still requires `auditlogs:view` on the observer.
+     *
+     *     Clients must ignore fields they do not recognize.
+     */
+    get: operations['getMetadata'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/namespaces': {
     parameters: {
       query?: never;
@@ -1213,6 +1240,78 @@ export interface paths {
      */
     post: operations['generateRelease'];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/namespaces/{namespaceName}/components/{componentName}/workflowruns': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Run a component workflow
+     * @description Starts a run of the component's configured workflow with the component's workflow parameters. With releaseLine set to one of the component's release lines, that line's workflow parameter overrides are applied. Omitted or main builds the main line.
+     */
+    post: operations['createComponentWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/namespaces/{namespaceName}/components/{componentName}/releaselines': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List component release lines
+     * @description Returns a paginated list of the release lines of a component. The first page of an unfiltered list starts with main, the implicit line every component has, described from its bindings without a release line.
+     */
+    get: operations['listComponentReleaseLines'];
+    put?: never;
+    /**
+     * Create component release line
+     * @description Creates a release line for a component. The owner is taken from the path. The name main is the implicit line, and default is reserved.
+     */
+    post: operations['createComponentReleaseLine'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/namespaces/{namespaceName}/components/{componentName}/releaselines/{releaseLineName}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get component release line
+     * @description Returns a release line of a component, including its status per environment. The name main returns the implicit line.
+     */
+    get: operations['getComponentReleaseLine'];
+    /**
+     * Update component release line
+     * @description Replaces the spec of a release line (full update). The owner cannot change. The implicit main line cannot be updated.
+     */
+    put: operations['updateComponentReleaseLine'];
+    post?: never;
+    /**
+     * Delete component release line
+     * @description Deletes a release line. The line's bindings in every environment, its releases and its Workload are then removed. The implicit main line cannot be deleted.
+     */
+    delete: operations['deleteComponentReleaseLine'];
     options?: never;
     head?: never;
     patch?: never;
@@ -2817,6 +2916,28 @@ export interface components {
        */
       message?: string;
     };
+    /** @description How this OpenChoreo installation is configured */
+    MetadataResponse: {
+      features: components['schemas']['MetadataFeatures'];
+    };
+    /** @description Optional platform features and how clients reach them */
+    MetadataFeatures: {
+      auditLogs: components['schemas']['AuditLogsFeature'];
+    };
+    /** @description Audit trail read path */
+    AuditLogsFeature: {
+      /**
+       * @description Whether clients can query audit logs through observerURL
+       * @example true
+       */
+      enabled: boolean;
+      /**
+       * Format: uri
+       * @description Base URL of the observer that serves the audit trail. Omitted when enabled is false.
+       * @example https://observer.example.com
+       */
+      observerURL?: string;
+    };
     /** @description Server version information */
     VersionResponse: {
       /**
@@ -3584,6 +3705,7 @@ export interface components {
        * @example http://finops-agent.observability-plane.svc:8080
        */
       finOpsAgentURL?: string;
+      secretStoreRef?: components['schemas']['SecretStoreRef'];
     };
     /** @description Observed state of an ObservabilityPlane */
     ObservabilityPlaneStatus: {
@@ -3753,6 +3875,7 @@ export interface components {
        * @example http://finops-agent.observability-plane.svc:8080
        */
       finOpsAgentURL?: string;
+      secretStoreRef?: components['schemas']['SecretStoreRef'];
     };
     /** @description Observed state of a ClusterObservabilityPlane */
     ClusterObservabilityPlaneStatus: {
@@ -4588,6 +4711,103 @@ export interface components {
         [key: string]: unknown;
       };
     };
+    /** @description Paginated list of the release lines of a component */
+    ReleaseLineList: {
+      items: components['schemas']['ReleaseLine'][];
+      pagination: components['schemas']['Pagination'];
+    };
+    /**
+     * @description ReleaseLine resource.
+     *     A named series of releases of one component that is built and deployed independently of the component's other lines.
+     */
+    ReleaseLine: {
+      /**
+       * @description API version of the resource
+       * @example openchoreo.dev/v1alpha1
+       */
+      readonly apiVersion?: string;
+      /**
+       * @description Kind of the resource
+       * @example ReleaseLine
+       */
+      readonly kind?: string;
+      metadata: components['schemas']['ObjectMeta'];
+      spec?: components['schemas']['ReleaseLineSpec'];
+      readonly status?: components['schemas']['ReleaseLineStatus'];
+    };
+    /** @description Desired state of a ReleaseLine */
+    ReleaseLineSpec: {
+      /** @description Component this release line belongs to */
+      owner: {
+        /**
+         * @description Name of the project
+         * @example default
+         */
+        projectName: string;
+        /**
+         * @description Name of the component
+         * @example hello
+         */
+        componentName: string;
+      };
+      /** @description Overrides the component's autoDeploy for this line */
+      autoDeploy?: boolean;
+      /** @description Deep-merged onto the component's parameters for this line */
+      parameters?: {
+        [key: string]: unknown;
+      };
+      /** @description Merged onto the component's traits for this line, keyed by kind, name and instance name */
+      traits?: components['schemas']['ComponentTrait'][];
+      /** @description Build overrides for this line */
+      workflow?: {
+        /** @description Deep-merged onto the component's workflow parameters for this line */
+        parameters?: {
+          [key: string]: unknown;
+        };
+      };
+    };
+    /** @description Observed state of a ReleaseLine */
+    ReleaseLineStatus: {
+      /**
+       * Format: int64
+       * @description Most recent generation observed by the controller
+       */
+      observedGeneration?: number;
+      /** @description Current state conditions of the release line */
+      conditions?: components['schemas']['Condition'][];
+      /** @description Most recent ComponentRelease produced for this line */
+      latestRelease?: {
+        /**
+         * @description Name of the ComponentRelease
+         * @example hello-next-fc84488f9
+         */
+        name?: string;
+        /** @description Hash of the ComponentRelease spec */
+        releaseHash?: string;
+      };
+      /** @description The line's ReleaseBindings, one per environment it is deployed to */
+      environments?: components['schemas']['ReleaseLineEnvironment'][];
+    };
+    /** @description A release line's deployment in one environment */
+    ReleaseLineEnvironment: {
+      /**
+       * @description Name of the environment
+       * @example development
+       */
+      environment: string;
+      /**
+       * @description Name of the line's ReleaseBinding in the environment
+       * @example hello-next-development
+       */
+      releaseBinding: string;
+      /**
+       * @description Name of the ComponentRelease bound in the environment
+       * @example hello-next-fc84488f9
+       */
+      release?: string;
+      /** @description Whether the ReleaseBinding reports Ready */
+      ready?: boolean;
+    };
     /** @description Paginated list of component releases */
     ComponentReleaseList: {
       items: components['schemas']['ComponentRelease'][];
@@ -4627,6 +4847,11 @@ export interface components {
          * @example api-service
          */
         componentName: string;
+        /**
+         * @description Release line this release belongs to. Omitted for the main line.
+         * @example next
+         */
+        releaseLine?: string;
       };
       /** @description Frozen ComponentType spec at release time */
       componentType: {
@@ -4738,6 +4963,11 @@ export interface components {
          * @example api-service
          */
         componentName: string;
+        /**
+         * @description Release line this binding belongs to. Omitted for the main line.
+         * @example next
+         */
+        releaseLine?: string;
       };
       /**
        * @description Target environment name
@@ -5795,6 +6025,24 @@ export interface components {
        * @example v1.0.0
        */
       releaseName?: string;
+      /**
+       * @description Release line to release from, built from the line's Workload and overrides. Omitted or main releases the main line.
+       * @example next
+       */
+      releaseLine?: string;
+    };
+    /** @description Request to run a component's workflow */
+    CreateComponentWorkflowRunRequest: {
+      /**
+       * @description Release line to build. Omitted or main builds the main line.
+       * @example api-service-v2
+       */
+      releaseLine?: string;
+      /**
+       * @description Optional commit SHA to build instead of the latest commit of the configured revision
+       * @example a1b2c3d
+       */
+      commit?: string;
     };
     /** @description Simple message response */
     MessageResponse: {
@@ -6451,6 +6699,11 @@ export interface components {
          * @example api-service
          */
         componentName: string;
+        /**
+         * @description Release line of the owning component. Omitted for the main line.
+         * @example api-service-v2
+         */
+        releaseLine?: string;
       };
       container?: components['schemas']['WorkloadContainer'];
       /** @description Named endpoint specifications */
@@ -6516,6 +6769,8 @@ export interface components {
       project?: string;
       /** @description Target component name */
       component: string;
+      /** @description Target component's release line. Omitted targets its main line. */
+      releaseLine?: string;
       /** @description Target endpoint name on the target component */
       name: string;
       /**
@@ -6687,14 +6942,32 @@ export interface components {
         }
     );
     /** @description Observed state of an ObservabilityAlertsNotificationChannel */
-    ObservabilityAlertsNotificationChannelStatus: Record<string, never>;
+    ObservabilityAlertsNotificationChannelStatus: {
+      /**
+       * Format: int64
+       * @description Generation of the most recently observed ObservabilityAlertsNotificationChannel
+       */
+      observedGeneration?: number;
+      /**
+       * @description Current state conditions of the ObservabilityAlertsNotificationChannel.
+       *     Ready reports whether the channel is applied to the observability plane, and SecretsReady
+       *     whether its secret values are available there. A SecretsReady reason of
+       *     DeprecatedKubernetesSecret means the channel still references Kubernetes Secrets.
+       */
+      conditions?: components['schemas']['Condition'][];
+    };
     /** @description Configuration for email notification channels */
     NotificationEmailConfig: {
       /**
-       * @description Sender email address
+       * @description Sender email address. Must be a bare address; it is also used as the SMTP envelope sender.
        * @example alerts@example.com
        */
       from: string;
+      /**
+       * @description Optional sender display name. When set, the From header is rendered as "fromName <from>".
+       * @example Example Alerts
+       */
+      fromName?: string;
       /**
        * @description List of recipient email addresses
        * @example [
@@ -6745,6 +7018,12 @@ export interface components {
        * @example Alert: ${alert.name} triggered at ${alert.startsAt}.
        */
       body: string;
+      /**
+       * @description Content type of the email body (text/plain or text/html)
+       * @default text/plain
+       * @enum {string}
+       */
+      contentType: 'text/plain' | 'text/html';
     };
     /** @description Configuration for webhook notification channels */
     NotificationWebhookConfig: {
@@ -6771,15 +7050,20 @@ export interface components {
     NotificationSecretValueFrom: {
       secretKeyRef?: components['schemas']['NotificationSecretKeyRef'];
     };
-    /** @description Reference to a specific key in a Kubernetes secret */
+    /**
+     * @description Reference to a secret value. The name refers to a SecretReference in the channel's namespace,
+     *     such as one created with the secrets API targeting the channel's observability plane, and the key
+     *     to one of its data entries. If no SecretReference has that name, a Kubernetes Secret with that
+     *     name and key is used instead; referencing Kubernetes Secrets is deprecated.
+     */
     NotificationSecretKeyRef: {
       /**
-       * @description Name of the Kubernetes secret
+       * @description Name of the SecretReference (or, deprecated, of the Kubernetes Secret)
        * @example smtp-credentials
        */
       name?: string;
       /**
-       * @description Key within the secret
+       * @description Secret key of a SecretReference data entry (or, deprecated, key within the Kubernetes Secret)
        * @example password
        */
       key?: string;
@@ -6862,7 +7146,9 @@ export interface components {
         | 'WorkflowPlane'
         | 'ClusterWorkflowPlane'
         | 'DataPlane'
-        | 'ClusterDataPlane';
+        | 'ClusterDataPlane'
+        | 'ObservabilityPlane'
+        | 'ClusterObservabilityPlane';
       /**
        * @description Name of the target plane resource
        * @example default
@@ -7332,6 +7618,8 @@ export interface components {
     WorkflowNameParam: string;
     /** @description Component name */
     ComponentNameParam: string;
+    /** @description Release line name */
+    ReleaseLineNameParam: string;
     /** @description Workflow run name */
     WorkflowRunNameParam: string;
     /** @description Release binding name */
@@ -7498,6 +7786,28 @@ export interface operations {
           'application/json': components['schemas']['OAuthProtectedResourceMetadata'];
         };
       };
+    };
+  };
+  getMetadata: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Platform metadata */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetadataResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalError'];
     };
   };
   listNamespaces: {
@@ -10599,6 +10909,220 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableContent'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  createComponentWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['CreateComponentWorkflowRunRequest'];
+      };
+    };
+    responses: {
+      /** @description Workflow run created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  listComponentReleaseLines: {
+    parameters: {
+      query?: {
+        /**
+         * @description A label selector to filter resources using Kubernetes label selector syntax.
+         *     Supports equality-based requirements: "key=value" (equality), "key!=value" (inequality).
+         *     Supports set-based requirements: "key in (val1,val2)" (value in set), "key notin (val1,val2)" (value not in set).
+         *     Supports existence checks: "key" (label exists), "!key" (label does not exist).
+         *     Multiple requirements are comma-separated and ANDed together.
+         */
+        labelSelector?: components['parameters']['LabelSelectorParam'];
+        /** @description Maximum number of items to return per page */
+        limit?: components['parameters']['LimitParam'];
+        /**
+         * @description Opaque pagination cursor from a previous response.
+         *     Pass the `nextCursor` value from pagination metadata to fetch the next page.
+         */
+        cursor?: components['parameters']['CursorParam'];
+      };
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Release lines of the component */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReleaseLineList'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  createComponentReleaseLine: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReleaseLine'];
+      };
+    };
+    responses: {
+      /** @description Release line created successfully */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReleaseLine'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableContent'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  getComponentReleaseLine: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+        /** @description Release line name */
+        releaseLineName: components['parameters']['ReleaseLineNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Release line details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReleaseLine'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  updateComponentReleaseLine: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+        /** @description Release line name */
+        releaseLineName: components['parameters']['ReleaseLineNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReleaseLine'];
+      };
+    };
+    responses: {
+      /** @description Release line updated successfully */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReleaseLine'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableContent'];
+      500: components['responses']['InternalError'];
+    };
+  };
+  deleteComponentReleaseLine: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Namespace name */
+        namespaceName: components['parameters']['NamespaceNameParam'];
+        /** @description Component name */
+        componentName: components['parameters']['ComponentNameParam'];
+        /** @description Release line name */
+        releaseLineName: components['parameters']['ReleaseLineNameParam'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Release line deletion accepted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalError'];
     };
   };

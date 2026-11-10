@@ -1,6 +1,6 @@
 {
   "name": "@openchoreo/openapi-client-generator-node",
-  "version": "1.2.0",
+  "version": "1.4.0-m.2",
   "description": "Generic OpenAPI client generator for Backstage plugins",
   "license": "Apache-2.0",
   "main": "src/index.ts",
@@ -8,8 +8,7 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.cjs.js",
-    "types": "dist/index.d.ts",
-    "registry": "https://npm.pkg.github.com"
+    "types": "dist/index.d.ts"
   },
   "repository": {
     "type": "git",

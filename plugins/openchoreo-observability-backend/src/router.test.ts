@@ -21,8 +21,11 @@ describe('createRouter', () => {
   beforeEach(async () => {
     observabilityService = {
       resolveUrls: jest.fn(),
+      resolvePlatformUrls: jest.fn(),
       getReleaseBinding: jest.fn(),
       updateReleaseBinding: jest.fn(),
+      getResourceReleaseBinding: jest.fn(),
+      updateResourceReleaseBinding: jest.fn(),
       fetchDataPlaneNetPolProvider: jest.fn(),
     };
     tokenService = {
@@ -35,6 +38,7 @@ describe('createRouter', () => {
     };
     const router = await createRouter({
       httpAuth: mockServices.httpAuth(),
+      logger: mockServices.logger.mock(),
       observabilityService,
       tokenService,
       authEnabled: true,
@@ -58,6 +62,43 @@ describe('createRouter', () => {
     expect(response.body).toEqual({
       observerUrl: 'https://observer.example.com',
       rcaAgentUrl: 'https://rca.example.com',
+    });
+  });
+
+  it('should resolve the platform observer URL with no scope parameters', async () => {
+    observabilityService.resolvePlatformUrls.mockResolvedValue({
+      observerUrl: 'https://observer.example.com',
+    });
+
+    const response = await request(app).get('/resolve-platform-urls');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      observerUrl: 'https://observer.example.com',
+    });
+  });
+
+  it('should pass on an installation reporting audit logs disabled', async () => {
+    observabilityService.resolvePlatformUrls.mockResolvedValue({
+      auditLogsEnabled: false,
+    });
+
+    const response = await request(app).get('/resolve-platform-urls');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ auditLogsEnabled: false });
+  });
+
+  it('should report a failed platform resolution without the cause', async () => {
+    observabilityService.resolvePlatformUrls.mockRejectedValue(
+      new Error('ClusterObservabilityPlane lookup failed'),
+    );
+
+    const response = await request(app).get('/resolve-platform-urls');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: 'Failed to resolve the platform observer URL',
     });
   });
 
@@ -163,5 +204,91 @@ describe('createRouter', () => {
 
     expect(response.status).toBe(500);
     expect(response.body).toMatchObject({ error: 'upstream failure' });
+  });
+
+  it('should get a resource release binding', async () => {
+    observabilityService.getResourceReleaseBinding.mockResolvedValue({
+      data: { metadata: { name: 'pg-development' } },
+      error: undefined,
+      response: { status: 200 },
+    } as any);
+
+    const response = await request(app)
+      .get('/resource-release-binding')
+      .query({ namespaceName: 'default', bindingName: 'pg-development' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ metadata: { name: 'pg-development' } });
+    expect(observabilityService.getResourceReleaseBinding).toHaveBeenCalledWith(
+      'default',
+      'pg-development',
+      undefined,
+    );
+  });
+
+  it('should return 400 when resource-release-binding is missing parameters', async () => {
+    const response = await request(app)
+      .get('/resource-release-binding')
+      .query({ namespaceName: 'default' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: 'namespaceName and bindingName are required',
+    });
+  });
+
+  it('should pass the upstream status through when getting a resource release binding fails', async () => {
+    observabilityService.getResourceReleaseBinding.mockResolvedValue({
+      data: undefined,
+      error: { message: 'not found' },
+      response: { status: 404 },
+    } as any);
+
+    const response = await request(app)
+      .get('/resource-release-binding')
+      .query({ namespaceName: 'default', bindingName: 'missing' });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({ message: 'not found' });
+  });
+
+  it('should update a resource release binding and forward the user token', async () => {
+    tokenService.getUserToken.mockReturnValue('user-token');
+    observabilityService.updateResourceReleaseBinding.mockResolvedValue({
+      data: { metadata: { name: 'pg-development' } },
+      error: undefined,
+      response: { status: 200 },
+    } as any);
+
+    const body = {
+      metadata: { name: 'pg-development' },
+      spec: { resourceTypeEnvironmentConfigs: { memory: '256Mi' } },
+    };
+
+    const response = await request(app)
+      .put('/resource-release-binding')
+      .query({ namespaceName: 'default', bindingName: 'pg-development' })
+      .send(body);
+
+    expect(response.status).toBe(200);
+    expect(
+      observabilityService.updateResourceReleaseBinding,
+    ).toHaveBeenCalledWith('default', 'pg-development', body, 'user-token');
+  });
+
+  it('should return 403 when the API rejects the resource release binding update', async () => {
+    observabilityService.updateResourceReleaseBinding.mockResolvedValue({
+      data: undefined,
+      error: { message: 'forbidden' },
+      response: { status: 403 },
+    } as any);
+
+    const response = await request(app)
+      .put('/resource-release-binding')
+      .query({ namespaceName: 'default', bindingName: 'pg-development' })
+      .send({ spec: {} });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ message: 'forbidden' });
   });
 });

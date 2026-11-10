@@ -1,12 +1,13 @@
+import { openChoreoFetchApiRef } from '@openchoreo/backstage-plugin-react';
 import {
   ApiBlueprint,
   createFrontendPlugin,
   discoveryApiRef,
-  fetchApiRef,
   PageBlueprint,
   PluginWrapperBlueprint,
 } from '@backstage/frontend-plugin-api';
 import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
+import { isOpenChoreoManagedOfKind } from '@openchoreo/backstage-plugin-common';
 
 import { rootRouteRef } from './routes';
 import { genericWorkflowsClientApiRef } from './api/GenericWorkflowsClientApi';
@@ -17,7 +18,7 @@ const genericWorkflowsClientApi = ApiBlueprint.make({
   params: defineParams =>
     defineParams({
       api: genericWorkflowsClientApiRef,
-      deps: { discoveryApi: discoveryApiRef, fetchApi: fetchApiRef },
+      deps: { discoveryApi: discoveryApiRef, fetchApi: openChoreoFetchApiRef },
       factory: ({ discoveryApi, fetchApi }) =>
         new GenericWorkflowsClient(discoveryApi, fetchApi),
     }),
@@ -62,8 +63,9 @@ const workflowRunsEntityContent = EntityContentBlueprint.make({
   params: {
     path: '/runs',
     title: 'Runs',
+    group: 'deployment',
     filter: entity =>
-      ['workflow', 'clusterworkflow'].includes(entity.kind.toLowerCase()) &&
+      isOpenChoreoManagedOfKind('workflow', 'clusterworkflow')(entity) &&
       (entity.spec as { type?: string } | undefined)?.type === 'Generic',
     loader: () =>
       Promise.all([

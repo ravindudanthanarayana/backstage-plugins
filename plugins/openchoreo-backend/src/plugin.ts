@@ -35,7 +35,10 @@ import {
   matchesCapability,
   openchoreoNamespacedResourceRef,
 } from '@openchoreo/backstage-plugin-permission-backend-module-openchoreo-policy';
-import { annotationStoreRef } from '@openchoreo/backstage-plugin-catalog-backend-module';
+import {
+  annotationStoreRef,
+  immediateCatalogServiceRef,
+} from '@openchoreo/backstage-plugin-catalog-backend-module';
 
 /**
  * choreoPlugin backend plugin
@@ -58,6 +61,7 @@ export const choreoPlugin = createBackendPlugin({
         config: coreServices.rootConfig,
         tokenService: openChoreoTokenServiceRef,
         annotationStore: annotationStoreRef,
+        immediateCatalog: immediateCatalogServiceRef,
       },
       async init({
         logger,
@@ -68,6 +72,7 @@ export const choreoPlugin = createBackendPlugin({
         permissionsRegistry,
         auth,
         annotationStore,
+        immediateCatalog,
       }) {
         const openchoreoConfig = config.getOptionalConfig('openchoreo');
 
@@ -256,6 +261,9 @@ export const choreoPlugin = createBackendPlugin({
             wirelogsInfoService,
             versionService,
             annotationStore,
+            immediateCatalog,
+            defaultOwner:
+              config.getOptionalString('openchoreo.defaultOwner') || 'guests',
             catalogService: catalog,
             auth,
             tokenService,

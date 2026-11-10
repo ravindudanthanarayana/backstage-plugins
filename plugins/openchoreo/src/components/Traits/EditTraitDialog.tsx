@@ -10,22 +10,23 @@ import {
   Box,
   Typography,
 } from '@material-ui/core';
+import { useApi, discoveryApiRef } from '@backstage/core-plugin-api';
 import {
-  useApi,
-  discoveryApiRef,
-  fetchApiRef,
-} from '@backstage/core-plugin-api';
+  openChoreoFetchApiRef,
+  useReleaseLine,
+} from '@openchoreo/backstage-plugin-react';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { RjsfForm } from '@openchoreo/backstage-design-system';
 import { JSONSchema7 } from 'json-schema';
 import validator from '@rjsf/validator-ajv8';
 import { TraitConfigToggle } from '@openchoreo/backstage-plugin-react';
 import { useTraitsStyles } from './styles';
+import { generateUiSchemaWithTitles } from './uiSchema';
+import { withoutFilledDefaults } from './traitDefaults';
 import { ComponentTrait } from '../../api/OpenChoreoClientApi';
 import { ResponseError } from '@backstage/errors';
 import { extractEntityMetadata } from '../../utils/entityUtils';
 import { isForbiddenError, getErrorMessage } from '../../utils/errorUtils';
-import { sanitizeLabel } from '@openchoreo/backstage-plugin-common';
 
 interface EditTraitDialogProps {
   open: boolean;
@@ -63,77 +64,6 @@ function hasEmptyRequiredFields(
   return false;
 }
 
-/**
- * Recursively generates a UI Schema with sanitized titles for all fields
- * that don't already have a title in the JSON Schema.
- */
-function generateUiSchemaWithTitles(
-  schema: any,
-  hideErrors: boolean = false,
-): any {
-  if (!schema || typeof schema !== 'object') {
-    return {};
-  }
-
-  const uiSchema: any = {};
-
-  // Handle object properties
-  if (schema.properties) {
-    Object.entries(schema.properties).forEach(
-      ([key, propSchema]: [string, any]) => {
-        if (!propSchema || typeof propSchema !== 'object') {
-          return;
-        }
-
-        // If the property doesn't have a title, add one in the UI schema
-        const fieldUiSchema: any = {};
-
-        if (!propSchema.title) {
-          fieldUiSchema['ui:title'] = sanitizeLabel(key);
-        }
-
-        // Hide errors if requested
-        if (hideErrors) {
-          fieldUiSchema['ui:options'] = {
-            ...fieldUiSchema['ui:options'],
-            hideError: true,
-          };
-        }
-
-        uiSchema[key] = fieldUiSchema;
-
-        // Recursively handle nested objects
-        if (propSchema.type === 'object' && propSchema.properties) {
-          const nestedUiSchema = generateUiSchemaWithTitles(
-            propSchema,
-            hideErrors,
-          );
-          uiSchema[key] = {
-            ...uiSchema[key],
-            ...nestedUiSchema,
-          };
-        }
-
-        // Handle array items
-        if (propSchema.type === 'array' && propSchema.items) {
-          const itemsUiSchema = generateUiSchemaWithTitles(
-            propSchema.items,
-            hideErrors,
-          );
-          if (Object.keys(itemsUiSchema).length > 0) {
-            uiSchema[key] = {
-              ...uiSchema[key],
-              items: itemsUiSchema,
-            };
-          }
-        }
-      },
-    );
-  }
-
-  return uiSchema;
-}
-
 export const EditTraitDialog: React.FC<EditTraitDialogProps> = ({
   open,
   onClose,
@@ -144,7 +74,8 @@ export const EditTraitDialog: React.FC<EditTraitDialogProps> = ({
   const classes = useTraitsStyles();
   const { entity } = useEntity();
   const discoveryApi = useApi(discoveryApiRef);
-  const fetchApi = useApi(fetchApiRef);
+  const fetchApi = useApi(openChoreoFetchApiRef);
+  const { releaseLine } = useReleaseLine();
 
   const [instanceName, setInstanceName] = useState<string>('');
   const [parameters, setParameters] = useState<Record<string, any>>({});
@@ -291,11 +222,17 @@ export const EditTraitDialog: React.FC<EditTraitDialogProps> = ({
       return;
     }
 
+    // On a release line, keep only what the trait had or the user changed,
+    // not the defaults the form filled in, so the line doesn't pin them as
+    // overrides. A component's own traits are saved as before.
     const updatedTrait: ComponentTrait = {
       kind: trait.kind,
       name: trait.name,
       instanceName: instanceName.trim(),
-      parameters,
+      parameters:
+        releaseLine && traitSchema
+          ? withoutFilledDefaults(traitSchema, parameters, trait.parameters)
+          : parameters,
     };
 
     onSave(updatedTrait);

@@ -11,6 +11,12 @@ export interface ObservabilityUrlsResult {
   finopsAgentUrl?: string;
 }
 
+/** Resolved observer for a platform-wide read, such as the audit trail. */
+export interface PlatformObservabilityResult extends ObservabilityUrlsResult {
+  /** `false` when the installation reports that audit logs cannot be queried. */
+  auditLogsEnabled?: boolean;
+}
+
 /** Options for constructing an ObservabilityUrlResolver. */
 export interface ObservabilityUrlResolverOptions {
   baseUrl: string;
@@ -36,6 +42,9 @@ const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  *
  * **Build observability** (namespace-based):
  *   WorkflowPlane (or ClusterWorkflowPlane) → ObservabilityPlane → observerURL
+ *
+ * **Platform observability** (no scope):
+ *   `/api/v1alpha1/metadata` → features.auditLogs.observerURL
  */
 export class ObservabilityUrlResolver {
   private readonly baseUrl: string;
@@ -135,6 +144,36 @@ export class ObservabilityUrlResolver {
       observabilityPlaneRef!,
     );
 
+    this.putInCache(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Resolve the observer for a platform-wide read — one that has no
+   * environment to resolve through, such as the audit trail — as the API
+   * advertises it at `/api/v1alpha1/metadata`.
+   */
+  async resolveForPlatform(
+    token?: string,
+  ): Promise<PlatformObservabilityResult> {
+    const cacheKey = 'platform';
+    const cached = this.getFromCache(cacheKey);
+    if (cached) return cached;
+
+    const auditLogs = await this.getAdvertisedAuditLogs(
+      this.createClient(token),
+    );
+    if (!auditLogs.enabled) {
+      // Not cached, so enabling the trail is picked up on the next request.
+      return { auditLogsEnabled: false };
+    }
+    if (!auditLogs.observerURL) {
+      throw new Error(
+        'Platform metadata reports audit logs enabled without an observer URL',
+      );
+    }
+
+    const result = { observerUrl: auditLogs.observerURL };
     this.putInCache(cacheKey, result);
     return result;
   }
@@ -250,6 +289,21 @@ export class ObservabilityUrlResolver {
     );
     this.putInCache(cacheKey, result);
     return result;
+  }
+
+  /** The audit read path as the API advertises it. */
+  private async getAdvertisedAuditLogs(
+    client: ReturnType<typeof createOpenChoreoApiClient>,
+  ) {
+    const { data, error, response } = await client.GET(
+      '/api/v1alpha1/metadata',
+    );
+    if (error || !response.ok || !data) {
+      throw new Error(
+        `Failed to get platform metadata: ${response.status} ${response.statusText}`,
+      );
+    }
+    return data.features.auditLogs;
   }
 
   private async getObservabilityPlaneUrls(
