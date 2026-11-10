@@ -1580,7 +1580,8 @@ export async function createRouter({
   });
 
   router.get('/release-binding-revisions', async (req, res) => {
-    const { namespaceName, componentName, environment } = req.query;
+    const { namespaceName, componentName, environment, bindingName } =
+      req.query;
 
     if (!namespaceName || !componentName || !environment) {
       throw new InputError(
@@ -1596,6 +1597,9 @@ export async function createRouter({
           namespaceName: namespaceName as string,
           componentName: componentName as string,
           environment: environment as string,
+          ...(typeof bindingName === 'string' && bindingName
+            ? { bindingName }
+            : {}),
         },
         userToken,
       ),
@@ -1666,7 +1670,7 @@ export async function createRouter({
   );
 
   router.get('/resource-release-binding-revisions', async (req, res) => {
-    const { namespaceName, resourceName, environment } = req.query;
+    const { namespaceName, resourceName, environment, bindingName } = req.query;
 
     if (!namespaceName || !resourceName || !environment) {
       throw new InputError(
@@ -1682,6 +1686,9 @@ export async function createRouter({
           namespaceName: namespaceName as string,
           resourceName: resourceName as string,
           environment: environment as string,
+          ...(typeof bindingName === 'string' && bindingName
+            ? { bindingName }
+            : {}),
         },
         userToken,
       ),

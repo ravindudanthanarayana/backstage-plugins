@@ -834,11 +834,14 @@ export interface OpenChoreoClientApi {
 
   /**
    * List the revisions of the component's release binding in one
-   * environment. Order is not guaranteed; callers sort.
+   * environment. Order is not guaranteed; callers sort. Pass bindingName to
+   * keep one binding's history: a component has one binding per release line
+   * in an environment, each numbered from r1.
    */
   listReleaseBindingRevisions(
     entity: Entity,
     environment: string,
+    bindingName?: string,
   ): Promise<ReleaseBindingRevision[]>;
 
   /**
@@ -868,11 +871,13 @@ export interface OpenChoreoClientApi {
 
   /**
    * List the revisions of the Resource's release binding in one
-   * environment. Order is not guaranteed; callers sort.
+   * environment. Order is not guaranteed; callers sort. Pass bindingName to
+   * keep one binding's history.
    */
   listResourceReleaseBindingRevisions(
     entity: Entity,
     environment: string,
+    bindingName?: string,
   ): Promise<ResourceReleaseBindingRevision[]>;
 
   /**

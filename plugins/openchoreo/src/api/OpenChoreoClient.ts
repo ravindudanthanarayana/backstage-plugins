@@ -695,6 +695,7 @@ export class OpenChoreoClient implements OpenChoreoClientApi {
   async listReleaseBindingRevisions(
     entity: Entity,
     environment: string,
+    bindingName?: string,
   ): Promise<ReleaseBindingRevision[]> {
     const metadata = extractEntityMetadata(entity);
 
@@ -705,6 +706,7 @@ export class OpenChoreoClient implements OpenChoreoClientApi {
           namespaceName: metadata.namespace,
           componentName: metadata.component,
           environment,
+          ...(bindingName ? { bindingName } : {}),
         },
       },
     );
@@ -759,6 +761,7 @@ export class OpenChoreoClient implements OpenChoreoClientApi {
   async listResourceReleaseBindingRevisions(
     entity: Entity,
     environment: string,
+    bindingName?: string,
   ): Promise<ResourceReleaseBindingRevision[]> {
     const { resourceName, namespaceName } =
       extractResourceEntityMetadata(entity);
@@ -770,6 +773,7 @@ export class OpenChoreoClient implements OpenChoreoClientApi {
           namespaceName,
           resourceName,
           environment,
+          ...(bindingName ? { bindingName } : {}),
         },
       },
     );

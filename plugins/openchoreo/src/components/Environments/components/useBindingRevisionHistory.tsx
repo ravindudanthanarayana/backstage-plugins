@@ -89,7 +89,7 @@ export const useBindingRevisionHistory = ({
   const alertApi = useApi(alertApiRef);
 
   const { revisions, loading, error, isRefetching, awaitRevision, refetch } =
-    useReleaseBindingRevisions(entity, envResourceName, { kind });
+    useReleaseBindingRevisions(entity, envResourceName, bindingName, { kind });
 
   const active = revisions.find(isActive);
   const [selectedName, setSelectedName] = useState<string | null>(null);

@@ -39,7 +39,7 @@ function renderRevisions(
   const client = { listReleaseBindingRevisions } as any;
   return renderHook(
     ({ env }) =>
-      useReleaseBindingRevisions(entity, env, {
+      useReleaseBindingRevisions(entity, env, 'api-development', {
         pollIntervalMs: POLL_MS,
         awaitTimeoutMs: 2000,
       }),
@@ -69,7 +69,7 @@ describe('useReleaseBindingRevisions', () => {
     expect(result.current.revisions.map(r => r.spec.revision)).toEqual([
       3, 2, 1,
     ]);
-    expect(list).toHaveBeenCalledWith(entity, 'development');
+    expect(list).toHaveBeenCalledWith(entity, 'development', 'api-development');
   });
 
   it('does not fetch without an environment', async () => {
@@ -198,7 +198,7 @@ describe('useReleaseBindingRevisions', () => {
     const client = { listReleaseBindingRevisions: list } as any;
     const { result } = renderHook(
       () =>
-        useReleaseBindingRevisions(entity, 'development', {
+        useReleaseBindingRevisions(entity, 'development', 'api-development', {
           pollIntervalMs: POLL_MS,
           awaitTimeoutMs: POLL_MS * 3,
         }),
@@ -224,7 +224,7 @@ describe('useReleaseBindingRevisions', () => {
     const renderResource = (client: Record<string, jest.Mock>) =>
       renderHook(
         () =>
-          useReleaseBindingRevisions(entity, 'development', {
+          useReleaseBindingRevisions(entity, 'development', 'api-development', {
             kind: 'resource',
             pollIntervalMs: POLL_MS,
             awaitTimeoutMs: 2000,
@@ -252,6 +252,7 @@ describe('useReleaseBindingRevisions', () => {
       expect(listResourceReleaseBindingRevisions).toHaveBeenCalledWith(
         entity,
         'development',
+        'api-development',
       );
       expect(listReleaseBindingRevisions).not.toHaveBeenCalled();
     });

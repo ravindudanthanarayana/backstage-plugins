@@ -55,12 +55,15 @@ export interface UseReleaseBindingRevisionsResult {
 
 /**
  * Fetches the revision history of the entity's binding in one environment:
- * a Component's ReleaseBinding, or a Resource's ResourceReleaseBinding. The list refreshes on an interval while any revision is
+ * a Component's ReleaseBinding, or a Resource's ResourceReleaseBinding.
+ * bindingName narrows it to that binding, since a component has one binding
+ * per release line in an environment. The list refreshes on an interval while any revision is
  * Progressing, and while a revision passed to awaitRevision is missing.
  */
 export function useReleaseBindingRevisions(
   entity: Entity,
   environment: string | undefined,
+  bindingName: string | undefined,
   {
     kind = 'component',
     pollIntervalMs = REVISION_POLL_INTERVAL_MS,
@@ -77,6 +80,7 @@ export function useReleaseBindingRevisions(
         : 'releaseBindingRevisions',
       stringifyEntityRef(entity),
       environment ?? '',
+      bindingName ?? '',
     ],
     async () =>
       sortNewestFirst(
@@ -84,8 +88,13 @@ export function useReleaseBindingRevisions(
           ? await client.listResourceReleaseBindingRevisions(
               entity,
               environment!,
+              bindingName,
             )
-          : await client.listReleaseBindingRevisions(entity, environment!),
+          : await client.listReleaseBindingRevisions(
+              entity,
+              environment!,
+              bindingName,
+            ),
       ),
     {
       enabled: !!environment,

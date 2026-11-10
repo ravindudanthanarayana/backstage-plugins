@@ -69,6 +69,32 @@ describe('ReleaseBindingRevisionService', () => {
       );
     });
 
+    it('narrows to one binding when a binding name is given', async () => {
+      mockGET.mockResolvedValueOnce(
+        createOkResponse({ items: [revision(1)], pagination: {} }),
+      );
+
+      await createService().listRevisions(
+        { ...listRequest, bindingName: 'api-next-development' },
+        'tok',
+      );
+
+      expect(mockGET).toHaveBeenCalledWith(
+        '/api/v1/namespaces/{namespaceName}/releasebindingrevisions',
+        {
+          params: {
+            path: { namespaceName: 'test-ns' },
+            query: {
+              component: 'api',
+              environment: 'development',
+              binding: 'api-next-development',
+              limit: 100,
+            },
+          },
+        },
+      );
+    });
+
     it('follows the cursor across pages', async () => {
       mockGET
         .mockResolvedValueOnce(

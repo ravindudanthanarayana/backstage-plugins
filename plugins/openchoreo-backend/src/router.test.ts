@@ -924,6 +924,34 @@ describe('createRouter', () => {
       );
     });
 
+    it('passes the binding name through', async () => {
+      services.releaseBindingRevisionService.listRevisions.mockResolvedValue(
+        [],
+      );
+
+      const response = await request(app)
+        .get('/release-binding-revisions')
+        .query({
+          namespaceName: 'my-namespace',
+          componentName: 'api',
+          environment: 'development',
+          bindingName: 'api-next-development',
+        });
+
+      expect(response.status).toBe(200);
+      expect(
+        services.releaseBindingRevisionService.listRevisions,
+      ).toHaveBeenCalledWith(
+        {
+          namespaceName: 'my-namespace',
+          componentName: 'api',
+          environment: 'development',
+          bindingName: 'api-next-development',
+        },
+        'mock-user-token',
+      );
+    });
+
     it('returns 400 without an environment', async () => {
       const response = await request(app)
         .get('/release-binding-revisions')

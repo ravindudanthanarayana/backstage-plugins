@@ -230,6 +230,7 @@ describe('ResourceRevisionHistorySection', () => {
     expect(listResourceReleaseBindingRevisions).toHaveBeenCalledWith(
       entity,
       'development',
+      'orders-db-development',
     );
     // Permissions key on the environment's resource name, through the
     // resource-side hook only.

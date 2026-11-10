@@ -61,8 +61,9 @@ function conflictWithCode(
 /**
  * BFF service for ReleaseBinding and ResourceReleaseBinding revision history,
  * rollback and revision deletion. Revisions are recorded by the controller;
- * rollback restores the binding spec of an earlier revision and pins the
- * binding; deleting a revision removes it from the history for good.
+ * rollback restores the binding spec of an earlier revision, which the
+ * controller makes active again; deleting a revision removes it from the
+ * history for good.
  */
 export class ReleaseBindingRevisionService {
   private logger: LoggerService;
@@ -82,6 +83,8 @@ export class ReleaseBindingRevisionService {
       namespaceName: string;
       componentName: string;
       environment: string;
+      /** Only this binding's revisions: a component has one per release line. */
+      bindingName?: string;
     },
     token?: string,
   ): Promise<ReleaseBindingRevision[]> {
@@ -105,6 +108,9 @@ export class ReleaseBindingRevisionService {
               query: {
                 component: request.componentName,
                 environment: request.environment,
+                ...(request.bindingName
+                  ? { binding: request.bindingName }
+                  : {}),
                 limit: PAGE_LIMIT,
                 ...(cursor ? { cursor } : {}),
               },
@@ -125,6 +131,8 @@ export class ReleaseBindingRevisionService {
       namespaceName: string;
       resourceName: string;
       environment: string;
+      /** Only this binding's revisions: a component has one per release line. */
+      bindingName?: string;
     },
     token?: string,
   ): Promise<ResourceReleaseBindingRevision[]> {
@@ -148,6 +156,9 @@ export class ReleaseBindingRevisionService {
               query: {
                 resource: request.resourceName,
                 environment: request.environment,
+                ...(request.bindingName
+                  ? { binding: request.bindingName }
+                  : {}),
                 limit: PAGE_LIMIT,
                 ...(cursor ? { cursor } : {}),
               },
