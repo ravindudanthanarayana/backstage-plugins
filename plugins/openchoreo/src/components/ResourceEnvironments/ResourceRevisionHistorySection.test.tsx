@@ -103,6 +103,7 @@ const makeRevision = (
       resourceReleaseName: `orders-db-v${n}`,
       snapshotHash: `hash-${n}`,
       bindingSpec: {
+        owner: { projectName: 'shop', resourceName: 'orders-db' },
         releaseName: `orders-db-v${n}`,
         resourceTypeEnvironmentConfigs: { size: opts.size ?? 'small' },
       },
@@ -136,7 +137,7 @@ const history = () => [
 
 const preview: RollbackResponse = {
   revisionName: 'orders-db-development-r2',
-  revisionDisplayName: 'orders-db-v2-r2',
+  revisionDisplayName: 'orders-db-r2',
   revision: 2,
   targetRevision: 2,
   revertedFrom: 3,
@@ -223,7 +224,7 @@ describe('ResourceRevisionHistorySection', () => {
       .mockResolvedValue(history());
     setup({ listResourceReleaseBindingRevisions });
 
-    await expectPickerValue('orders-db-v3-r3');
+    await expectPickerValue('orders-db-r3');
     expect(screen.getByTestId('revision-selected-meta')).toHaveTextContent(
       '7h ago · Healthy · Override',
     );
@@ -246,19 +247,19 @@ describe('ResourceRevisionHistorySection', () => {
     }));
     expect(rows).toEqual([
       {
-        name: 'orders-db-v3-r3',
+        name: 'orders-db-r3',
         health: 'Healthy',
         active: true,
         knownGood: true,
       },
       {
-        name: 'orders-db-v2-r2',
+        name: 'orders-db-r2',
         health: 'Healthy',
         active: false,
         knownGood: true,
       },
       {
-        name: 'orders-db-v1-r1',
+        name: 'orders-db-r1',
         health: 'Degraded',
         active: false,
         knownGood: false,
@@ -297,10 +298,10 @@ describe('ResourceRevisionHistorySection', () => {
     );
     await screen.findByTestId('yaml-diff-viewer');
     expect(screen.getByTestId('diff-original-label')).toHaveTextContent(
-      /^orders-db-v3-r3 \(/,
+      /^orders-db-r3 \(/,
     );
     expect(screen.getByTestId('diff-modified-label')).toHaveTextContent(
-      'orders-db-v2-r2',
+      'orders-db-r2',
     );
     expect(
       parsed('diff-original').spec.bindingSpec.resourceTypeEnvironmentConfigs,
@@ -368,11 +369,11 @@ describe('ResourceRevisionHistorySection', () => {
     const dialog = await openConfirm(user, 2);
     expect(
       await within(dialog).findByText(
-        /No revision is created: orders-db-v2-r2 becomes active again\./,
+        /No revision is created: orders-db-r2 becomes active again\./,
       ),
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/replacing the active orders-db-v3-r3/),
+      within(dialog).getByText(/replacing the active orders-db-r3/),
     ).toBeInTheDocument();
     expect(within(dialog).getByTestId('rollback-changes')).toHaveTextContent(
       'resourceTypeEnvironmentConfigs{"size":"large"} → {"size":"small"}',
@@ -400,7 +401,7 @@ describe('ResourceRevisionHistorySection', () => {
     expect(rollbackReleaseBinding).not.toHaveBeenCalled();
     expect(alertApi.post).toHaveBeenCalledWith({
       message:
-        'Rolled back Development to revision 2: orders-db-v2-r2 is active again.',
+        'Rolled back Development to revision 2: orders-db-r2 is active again.',
       severity: 'success',
       display: 'transient',
     });
@@ -413,7 +414,7 @@ describe('ResourceRevisionHistorySection', () => {
         /Progressing · Deploy/,
       ),
     );
-    await expectPickerValue('orders-db-v2-r2');
+    await expectPickerValue('orders-db-r2');
     await openPicker(user);
     expect(
       within(screen.getByTestId('revision-row-2')).getByTestId(

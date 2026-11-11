@@ -6874,7 +6874,7 @@ export interface components {
        */
       revisionName: string;
       /**
-       * @description How the revision is shown to people, {release}-r{N}
+       * @description How the revision is shown to people, {component or resource name}-r{N}
        * @example api-service-v5-r2
        */
       revisionDisplayName?: string;
@@ -6902,7 +6902,7 @@ export interface components {
        */
       revisionName: string;
       /**
-       * @description How the target revision is shown to people, {release}-r{N}
+       * @description How the target revision is shown to people, {component or resource name}-r{N}
        * @example api-service-6f9c2a-r3
        */
       revisionDisplayName?: string;

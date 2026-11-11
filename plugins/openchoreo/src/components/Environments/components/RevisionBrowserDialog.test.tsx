@@ -56,6 +56,7 @@ const makeRevision = (
       componentReleaseName: `frontend-v${n}`,
       snapshotHash: `hash-${n}`,
       bindingSpec: {
+        owner: { projectName: 'shop', componentName: 'frontend' },
         releaseName: `frontend-v${n}`,
         componentTypeEnvironmentConfigs: { replicas: opts.replicas ?? 1 },
       },
@@ -112,7 +113,7 @@ describe('RevisionBrowserDialog', () => {
     expect(listedNumbers()).toEqual(['4', '3', '2', '1']);
     expect(screen.getByText('Showing 4 of 4')).toBeInTheDocument();
     const active = screen.getByTestId('browser-revision-4');
-    expect(within(active).getByText('frontend-v4-r4')).toBeInTheDocument();
+    expect(within(active).getByText('frontend-r4')).toBeInTheDocument();
     expect(within(active).getByText('Development')).toBeInTheDocument();
     expect(
       within(screen.getByTestId('browser-revision-3')).getByText(
@@ -123,7 +124,7 @@ describe('RevisionBrowserDialog', () => {
 
   it.each([
     ['r3', ['3']],
-    ['frontend-v3-r3', ['3']],
+    ['frontend-r3', ['3']],
     ['degraded', ['3']],
     ['promote', ['2']],
     ['active', ['4']],
@@ -162,10 +163,10 @@ describe('RevisionBrowserDialog', () => {
 
     await screen.findByTestId('yaml-diff-viewer');
     expect(screen.getByTestId('diff-original-label')).toHaveTextContent(
-      /^frontend-v4-r4 \(/,
+      /^frontend-r4 \(/,
     );
     expect(screen.getByTestId('diff-modified-label')).toHaveTextContent(
-      'frontend-v2-r2',
+      'frontend-r2',
     );
     const [original, modified] = [
       parsed('diff-original'),
@@ -192,12 +193,12 @@ describe('RevisionBrowserDialog', () => {
     );
     await user.click(screen.getByLabelText('Compare with'));
     await user.click(
-      within(await screen.findByRole('listbox')).getByText('frontend-v3-r3'),
+      within(await screen.findByRole('listbox')).getByText('frontend-r3'),
     );
 
     await waitFor(() =>
       expect(screen.getByTestId('diff-original-label')).toHaveTextContent(
-        /^frontend-v3-r3 \(/,
+        /^frontend-r3 \(/,
       ),
     );
     expect(parsed('diff-original').metadata.name).toBe(
@@ -240,7 +241,7 @@ describe('RevisionBrowserDialog deleting', () => {
     setup({
       onDelete,
       deleteBlockedReason: rev =>
-        rev.status?.active ? 'frontend-v4-r4 is currently active.' : null,
+        rev.status?.active ? 'frontend-r4 is currently active.' : null,
     });
 
     await user.click(screen.getByRole('button', { name: 'Delete r2' }));
@@ -317,7 +318,12 @@ describe('matchesRevision', () => {
   const hashed = (n: number, release: string) =>
     ({
       metadata: { name: `api-development-r${n}` },
-      spec: { revision: n, cause: 'Deploy', componentReleaseName: release },
+      spec: {
+        revision: n,
+        cause: 'Deploy',
+        componentReleaseName: release,
+        bindingSpec: { owner: { projectName: 'shop', componentName: 'api' } },
+      },
       status: { health: 'Healthy', active: false },
     } as unknown as ReleaseBindingRevision);
   const revs = [
@@ -338,7 +344,8 @@ describe('matchesRevision', () => {
   it('still searches every field for anything else', () => {
     expect(matching('6')).toEqual([6, 2, 16, 1]);
     expect(matching('66bb')).toEqual([2]);
-    expect(matching('api-559db76545-r6')).toEqual([6]);
+    expect(matching('api-559db76545')).toEqual([6]);
+    expect(matching('api-r6')).toEqual([6]);
     expect(matching('healthy')).toHaveLength(4);
   });
 
@@ -349,6 +356,7 @@ describe('matchesRevision', () => {
         revision: 3,
         cause: 'Deploy',
         componentReleaseName: 'api-0a1b2c3d4e',
+        bindingSpec: { owner: { projectName: 'shop', componentName: 'api' } },
         message: 'Fix checkout timeout',
       },
     } as unknown as ReleaseBindingRevision;

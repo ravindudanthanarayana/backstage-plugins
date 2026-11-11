@@ -80,7 +80,10 @@ const makeRevision = (
       revision: n,
       cause: opts.cause ?? 'Deploy',
       componentReleaseName: opts.release ?? `frontend-v${n}`,
-      bindingSpec: { releaseName: opts.release ?? `frontend-v${n}` },
+      bindingSpec: {
+        owner: { projectName: 'shop', componentName: 'frontend' },
+        releaseName: opts.release ?? `frontend-v${n}`,
+      },
       ...(opts.message ? { message: opts.message } : {}),
     },
     status: {
@@ -113,7 +116,7 @@ const releases = ['frontend-v2', 'frontend-v3', 'frontend-v4'].map(release);
 
 const preview: RollbackResponse = {
   revisionName: 'frontend-development-r2',
-  revisionDisplayName: 'frontend-v2-r2',
+  revisionDisplayName: 'frontend-r2',
   revision: 2,
   targetRevision: 2,
   revertedFrom: 4,
@@ -215,7 +218,7 @@ describe('RevisionHistorySection', () => {
       listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
     });
 
-    await expectActiveRevision('frontend-v4-r4');
+    await expectActiveRevision('frontend-r4');
     const row = screen.getByTestId('revision-info-row');
     expect(within(row).getByText('Revision')).toBeInTheDocument();
     // Only the active revision shows; no picker or list.
@@ -223,7 +226,7 @@ describe('RevisionHistorySection', () => {
     expect(screen.queryAllByRole('option')).toHaveLength(0);
 
     await user.click(within(row).getByLabelText('Copy revision name'));
-    expect(await navigator.clipboard.readText()).toBe('frontend-v4-r4');
+    expect(await navigator.clipboard.readText()).toBe('frontend-r4');
   });
 
   it("views the active revision's manifest, like the release's", async () => {
@@ -232,7 +235,7 @@ describe('RevisionHistorySection', () => {
       listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
     });
 
-    await expectActiveRevision('frontend-v4-r4');
+    await expectActiveRevision('frontend-r4');
     await user.click(screen.getByLabelText('View revision'));
     const manifest = await screen.findByRole('dialog', {
       name: 'Revision manifest — Development',
@@ -259,7 +262,7 @@ describe('RevisionHistorySection', () => {
       listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
     });
 
-    await expectActiveRevision('frontend-v4-r4');
+    await expectActiveRevision('frontend-r4');
     await user.click(screen.getByLabelText('View revision'));
     const manifest = await screen.findByRole('dialog', {
       name: 'Revision manifest — Development',
@@ -323,7 +326,7 @@ describe('RevisionHistorySection', () => {
     expect(button).toBeDisabled();
     await user.hover(button.parentElement!);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      'Release frontend-v1 has been deleted, so frontend-v1-r1 can no longer be restored.',
+      'Release frontend-v1 has been deleted, so frontend-r1 can no longer be restored.',
     );
   });
 
@@ -336,7 +339,7 @@ describe('RevisionHistorySection', () => {
       listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
     });
 
-    await expectActiveRevision('frontend-v4-r4');
+    await expectActiveRevision('frontend-r4');
     expect(rollbackAction()).toBeDisabled();
     await user.hover(rollbackAction().parentElement!);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
@@ -354,7 +357,7 @@ describe('RevisionHistorySection', () => {
         .mockResolvedValue([makeRevision(1, { active: true })]),
     });
 
-    await expectActiveRevision('frontend-v1-r1');
+    await expectActiveRevision('frontend-r1');
     expect(rollbackAction()).toBeDisabled();
     await user.hover(rollbackAction().parentElement!);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
@@ -399,7 +402,7 @@ describe('RevisionHistorySection', () => {
     // The dialog previews with a dry run and shows its warnings.
     expect(
       await within(dialog).findByText(
-        /No revision is created: frontend-v2-r2 becomes active again\./,
+        /No revision is created: frontend-r2 becomes active again\./,
       ),
     ).toBeInTheDocument();
     expect(
@@ -430,7 +433,7 @@ describe('RevisionHistorySection', () => {
     );
     expect(alertApi.post).toHaveBeenCalledWith({
       message:
-        'Rolled back Development to revision 2: frontend-v2-r2 is active again.',
+        'Rolled back Development to revision 2: frontend-r2 is active again.',
       severity: 'success',
       display: 'transient',
     });
@@ -442,7 +445,7 @@ describe('RevisionHistorySection', () => {
 
     // Without a reload, the row shows r2 as the active revision, and the
     // browser marks r2 Active and no longer r4; no revision is added.
-    await expectActiveRevision('frontend-v2-r2');
+    await expectActiveRevision('frontend-r2');
     await user.click(screen.getByLabelText('View revision'));
     await user.click(
       await screen.findByRole('button', { name: 'Open Revision Browser' }),
@@ -588,7 +591,7 @@ describe('RevisionHistorySection', () => {
       .mockImplementation((_e, _b, revisionName: string, dryRun: boolean) =>
         Promise.resolve({
           revisionName,
-          revisionDisplayName: 'frontend-v3-r3',
+          revisionDisplayName: 'frontend-r3',
           revision: 3,
           binding: 'frontend-development',
           environment: 'development',
@@ -604,10 +607,10 @@ describe('RevisionHistorySection', () => {
     await user.click(screen.getByRole('button', { name: 'Delete r3' }));
 
     const dialog = await screen.findByRole('dialog', {
-      name: 'Delete revision frontend-v3-r3?',
+      name: 'Delete revision frontend-r3?',
     });
     const details = within(dialog).getByTestId('delete-revision-details');
-    expect(details).toHaveTextContent('frontend-v3-r3 (revision 3)');
+    expect(details).toHaveTextContent('frontend-r3 (revision 3)');
     expect(details).toHaveTextContent('frontend-development');
     expect(details).toHaveTextContent('Development');
     expect(details).toHaveTextContent('Inactive · Degraded');
@@ -634,8 +637,7 @@ describe('RevisionHistorySection', () => {
     );
     expect(alertApi.post).toHaveBeenCalledWith(
       expect.objectContaining({
-        message:
-          "Deleted revision 3 (frontend-v3-r3) from Development's history.",
+        message: "Deleted revision 3 (frontend-r3) from Development's history.",
         severity: 'success',
       }),
     );

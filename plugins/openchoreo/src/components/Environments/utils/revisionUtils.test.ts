@@ -22,7 +22,12 @@ const makeRevision = (
 ): ReleaseBindingRevision =>
   ({
     metadata: { name: `api-dev-r${n}` },
-    spec: { revision: n, cause: 'Deploy', componentReleaseName: `api-v${n}` },
+    spec: {
+      revision: n,
+      cause: 'Deploy',
+      componentReleaseName: `api-v${n}`,
+      bindingSpec: { owner: { projectName: 'shop', componentName: 'api' } },
+    },
     status: { health: 'Healthy', active: false, knownGood: false, ...status },
   } as unknown as ReleaseBindingRevision);
 
@@ -126,7 +131,7 @@ describe('rollbackBlockedReason', () => {
 
   it('blocks a revision whose release is gone', () => {
     expect(rollbackBlockedReason(makeRevision(3), allowed)).toBe(
-      'Release api-v3 has been deleted, so api-v3-r3 can no longer be restored.',
+      'Release api-v3 has been deleted, so api-r3 can no longer be restored.',
     );
   });
 
@@ -142,7 +147,7 @@ describe('rollbackBlockedReason', () => {
   it('blocks the active revision', () => {
     expect(
       rollbackBlockedReason(makeRevision(2, { active: true }), allowed),
-    ).toBe('api-v2-r2 is already active.');
+    ).toBe('api-r2 is already active.');
   });
 
   it('puts a missing permission first', () => {
@@ -218,9 +223,9 @@ describe('revisionAccessibleName', () => {
           knownGood: true,
         }),
       ),
-    ).toBe('api-v3-r3, Progressing, cause Deploy, active, known good');
+    ).toBe('api-r3, Progressing, cause Deploy, active, known good');
     expect(revisionAccessibleName(makeRevision(1))).toBe(
-      'api-v1-r1, Healthy, cause Deploy',
+      'api-r1, Healthy, cause Deploy',
     );
   });
 });
@@ -241,7 +246,7 @@ describe('deleteBlockedReason', () => {
 
   it('protects the active revision', () => {
     expect(deleteBlockedReason(history[0], history, allowed)).toBe(
-      'api-v4-r4 is currently active and cannot be deleted.',
+      'api-r4 is currently active and cannot be deleted.',
     );
   });
 

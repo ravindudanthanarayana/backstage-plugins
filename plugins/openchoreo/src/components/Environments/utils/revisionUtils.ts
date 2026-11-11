@@ -48,13 +48,22 @@ export const revisionReleaseName = (rev: BindingRevision): string =>
     : rev.spec.componentReleaseName;
 
 /**
- * How a revision is shown: the release it binds and its number,
- * {release}-r{N}, e.g. frontend-v7-r1. Numbers count from 1 per environment.
- * The object's own name is {binding}-r{N} (metadata.name), which is what
- * selection and the API use.
+ * The Component or Resource whose binding a revision records: the owner in
+ * the binding spec the revision copied.
+ */
+export const revisionOwnerName = (rev: BindingRevision): string => {
+  const owner = rev.spec.bindingSpec.owner;
+  return 'resourceName' in owner ? owner.resourceName : owner.componentName;
+};
+
+/**
+ * How a revision is shown: the component (or resource) name and the
+ * revision number, {name}-r{N}, e.g. frontend-r1. Numbers count from 1 per
+ * binding. The object's own name is {binding}-r{N} (metadata.name), which is
+ * what selection and the API use.
  */
 export const revisionName = (rev: BindingRevision): string =>
-  `${revisionReleaseName(rev)}-r${rev.spec.revision}`;
+  `${revisionOwnerName(rev)}-r${rev.spec.revision}`;
 
 /**
  * The reason given for the change a revision records (its change message),
@@ -78,7 +87,7 @@ export const isKnownGood = (rev: BindingRevision): boolean =>
 
 /**
  * The accessible name of a revision row, e.g.
- * "frontend-v5-r4, Healthy, cause Deploy, active, known good".
+ * "frontend-r4, Healthy, cause Deploy, active, known good".
  * The row's visible text is split across badges, so it is spelled out.
  */
 export const revisionAccessibleName = (rev: BindingRevision): string =>
