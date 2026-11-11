@@ -22,11 +22,13 @@ import { openChoreoClientApiRef } from '../../../api/OpenChoreoClientApi';
 import {
   type BindingKind,
   describeRollbackError,
+  isAutoDeployBlocked,
   isConcurrentModification,
   isNotFound,
   revisionName,
   revisionNumber,
 } from '../utils/revisionUtils';
+import { RollbackAutoDeployToggle } from './RollbackAutoDeployToggle';
 
 /** The longest rollback reason the OpenChoreo API accepts, in characters. */
 const MAX_MESSAGE_LENGTH = 1024;
@@ -125,6 +127,9 @@ export const RollbackConfirmDialog = ({
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  // Set once auto deploy blocks the rollback, so the switch that turns it
+  // off stays in the dialog after the block is lifted.
+  const [autoDeployBlocked, setAutoDeployBlocked] = useState(false);
 
   const targetNumber = target ? revisionNumber(target) : 0;
 
@@ -158,6 +163,7 @@ export const RollbackConfirmDialog = ({
       setPreview({ state: 'ready', result });
     } catch (e) {
       setPreview({ state: 'error', message: describeRollbackError(e) });
+      if (isAutoDeployBlocked(e)) setAutoDeployBlocked(true);
       if (isNotFound(e)) onTargetMissing?.();
     }
     // onTargetMissing is a callback prop; re-running the preview when it
@@ -170,6 +176,7 @@ export const RollbackConfirmDialog = ({
     setApplyError(null);
     setApplying(false);
     setMessage('');
+    setAutoDeployBlocked(false);
     runPreview();
   }, [open, target, runPreview]);
 
@@ -223,6 +230,10 @@ export const RollbackConfirmDialog = ({
 
         {preview.state === 'error' && (
           <Alert severity="error">{preview.message}</Alert>
+        )}
+
+        {autoDeployBlocked && kind === 'component' && (
+          <RollbackAutoDeployToggle onChanged={runPreview} />
         )}
 
         {result && (

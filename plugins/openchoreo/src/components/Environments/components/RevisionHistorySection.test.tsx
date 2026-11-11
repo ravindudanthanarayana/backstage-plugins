@@ -26,8 +26,18 @@ jest.mock('@backstage/plugin-catalog-react', () => ({
 }));
 
 const mockRefetchEnvironments = jest.fn();
+// The component's auto deploy setting, as the Set up pane shares it.
+const mockAutoDeploy = { value: true };
+const mockSetAutoDeployOptimistic = jest.fn((next: boolean) => {
+  mockAutoDeploy.value = next;
+});
 jest.mock('../EnvironmentsContext', () => ({
-  useEnvironmentsContext: () => ({ refetch: mockRefetchEnvironments }),
+  useEnvironmentsContext: () => ({
+    refetch: mockRefetchEnvironments,
+    autoDeploy: mockAutoDeploy.value,
+    autoDeployLoading: false,
+    setAutoDeployOptimistic: mockSetAutoDeployOptimistic,
+  }),
 }));
 
 const mockPermission = {
@@ -209,6 +219,7 @@ describe('RevisionHistorySection', () => {
     mockPermission.deniedTooltip = '';
     mockDeletePermission.canDeleteRevision = true;
     mockDeletePermission.deniedTooltip = '';
+    mockAutoDeploy.value = true;
   });
 
   it('shows the active revision beside the release, like the release name', async () => {
@@ -757,9 +768,10 @@ describe('RevisionHistorySection', () => {
     expect(
       within(dialog).getByRole('button', { name: 'Roll back' }),
     ).toBeDisabled();
+    // The Set up pane's switch is offered in place, still on.
     expect(
-      within(dialog).queryByRole('button', { name: /auto deploy/i }),
-    ).not.toBeInTheDocument();
+      within(dialog).getByRole('checkbox', { name: 'Auto Deploy' }),
+    ).toBeChecked();
     // Only the preview ran; nothing was applied.
     expect(rollbackReleaseBinding).toHaveBeenCalledTimes(1);
     expect(rollbackReleaseBinding).toHaveBeenLastCalledWith(
@@ -768,6 +780,114 @@ describe('RevisionHistorySection', () => {
       2,
       true,
     );
+  });
+
+  it('turns auto deploy off from the blocked rollback and unblocks it', async () => {
+    const user = userEvent.setup();
+    const blocked = await apiError(409, {
+      message: 'Rollback blocked: auto-deploy is enabled',
+      code: 'AUTO_DEPLOY_ENABLED',
+    });
+    // Blocked until auto deploy is off, as the API decides it.
+    const rollbackReleaseBinding = jest.fn(
+      async (_e: unknown, _b: string, _rev: number, dryRun: boolean) => {
+        if (mockAutoDeploy.value) throw blocked;
+        return { ...preview, dryRun };
+      },
+    );
+    const patchComponent = jest.fn().mockResolvedValue(undefined);
+    setup({
+      listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
+      rollbackReleaseBinding,
+      patchComponent,
+    });
+
+    const dialog = await rollBackTo(user, 2);
+    const toggle = await within(dialog).findByRole('checkbox', {
+      name: 'Auto Deploy',
+    });
+    expect(toggle).toBeChecked();
+    expect(
+      within(dialog).getByRole('button', { name: 'Roll back' }),
+    ).toBeDisabled();
+
+    // Switching it off asks first, with the Set up pane's confirmation.
+    await user.click(toggle);
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Disable Auto Deploy?',
+    });
+    expect(patchComponent).not.toHaveBeenCalled();
+    await user.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() =>
+      expect(patchComponent).toHaveBeenCalledWith(entity, false),
+    );
+    expect(mockSetAutoDeployOptimistic).toHaveBeenCalledWith(false);
+
+    // The preview runs again and the rollback is now offered.
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole('button', { name: 'Roll back' }),
+      ).toBeEnabled(),
+    );
+    expect(within(dialog).queryByText(/Rollback blocked/)).toBeNull();
+    expect(
+      within(dialog).getByRole('checkbox', { name: 'Auto Deploy' }),
+    ).not.toBeChecked();
+    // Two dry runs, nothing applied.
+    expect(rollbackReleaseBinding).toHaveBeenCalledTimes(2);
+    expect(rollbackReleaseBinding.mock.calls.every(c => c[3] === true)).toBe(
+      true,
+    );
+  });
+
+  it('keeps auto deploy on when turning it off is cancelled or fails', async () => {
+    const user = userEvent.setup();
+    const blocked = await apiError(409, {
+      message: 'Rollback blocked: auto-deploy is enabled',
+      code: 'AUTO_DEPLOY_ENABLED',
+    });
+    const rollbackReleaseBinding = jest.fn().mockRejectedValue(blocked);
+    const patchComponent = jest.fn().mockRejectedValue(new Error('boom'));
+    setup({
+      listReleaseBindingRevisions: jest.fn().mockResolvedValue(history()),
+      rollbackReleaseBinding,
+      patchComponent,
+    });
+
+    const dialog = await rollBackTo(user, 2);
+    const toggle = await within(dialog).findByRole('checkbox', {
+      name: 'Auto Deploy',
+    });
+
+    // Cancelling the confirmation changes nothing.
+    await user.click(toggle);
+    let confirm = await screen.findByRole('dialog', {
+      name: 'Disable Auto Deploy?',
+    });
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(patchComponent).not.toHaveBeenCalled();
+    expect(toggle).toBeChecked();
+
+    // A failed save snaps the switch back and says why.
+    await user.click(toggle);
+    confirm = await screen.findByRole('dialog', {
+      name: 'Disable Auto Deploy?',
+    });
+    await user.click(within(confirm).getByRole('button', { name: 'Confirm' }));
+    expect(
+      await within(dialog).findByTestId('rollback-auto-deploy-error'),
+    ).toHaveTextContent('Failed to update auto deploy setting: boom');
+    expect(mockAutoDeploy.value).toBe(true);
+    // Found once the confirmation has closed and the dialog is exposed again.
+    expect(
+      await within(dialog).findByRole('checkbox', { name: 'Auto Deploy' }),
+    ).toBeChecked();
+    expect(
+      within(dialog).getByRole('button', { name: 'Roll back' }),
+    ).toBeDisabled();
+    // The rollback was only ever previewed, once.
+    expect(rollbackReleaseBinding).toHaveBeenCalledTimes(1);
   });
 
   it('sends the optional reason with the confirmed rollback only', async () => {

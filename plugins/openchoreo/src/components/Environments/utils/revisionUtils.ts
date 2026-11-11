@@ -179,6 +179,14 @@ const conflictCode = (error: unknown): string | undefined => {
 export const isConcurrentModification = (error: unknown): boolean =>
   conflictCode(error) === 'CONCURRENT_MODIFICATION';
 
+/**
+ * True when a rollback was refused because auto deploy would undo it: the
+ * binding is in the first environment of the deployment pipeline and auto
+ * deploy is on.
+ */
+export const isAutoDeployBlocked = (error: unknown): boolean =>
+  conflictCode(error) === 'AUTO_DEPLOY_ENABLED';
+
 /** A message for a failed rollback or rollback preview. */
 export const describeRollbackError = (error: unknown): string => {
   if (error instanceof ResponseError) {
