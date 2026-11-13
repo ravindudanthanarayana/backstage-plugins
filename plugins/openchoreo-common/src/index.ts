@@ -353,6 +353,22 @@ export type RollbackResponse =
  */
 export type DeleteBindingRevisionResponse =
   OpenChoreoComponents['schemas']['DeleteBindingRevisionResponse'];
+
+/**
+ * How many old revisions a binding keeps for rollback, and where the number
+ * comes from. The binding's own limit wins; when it is unset the
+ * Environment's applies, and when that is unset too, the controller's
+ * default, which the API does not report.
+ */
+export interface BindingRevisionHistoryLimit {
+  /** The binding's spec.revisionHistoryLimit; null when unset. */
+  bindingLimit: number | null;
+  /**
+   * The Environment's spec.revisionHistoryLimit; null when unset or when the
+   * user may not read the Environment.
+   */
+  environmentLimit: number | null;
+}
 /** A pre-flight finding of a rollback that does not block it */
 export type RollbackWarning =
   OpenChoreoComponents['schemas']['RollbackWarning'];

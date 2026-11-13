@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -22,6 +22,7 @@ import {
   ToggleButtonGroup,
 } from '@material-ui/lab';
 import CloseIcon from '@material-ui/icons/Close';
+import DeleteOutlineIcon from '@material-ui/icons/DeleteOutline';
 import FileCopyOutlinedIcon from '@material-ui/icons/FileCopyOutlined';
 import SearchIcon from '@material-ui/icons/Search';
 import { YamlViewer } from '@openchoreo/backstage-design-system';
@@ -111,6 +112,18 @@ const useStyles = makeStyles(theme => ({
   },
   footerStart: {
     marginRight: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing(1),
+  },
+  // Same look as the "Remove deployment" button in the danger zone.
+  deleteButton: {
+    color: theme.palette.error.main,
+    borderColor: theme.palette.error.main,
+    '&:hover': {
+      borderColor: theme.palette.error.dark,
+      backgroundColor: theme.palette.action.hover,
+    },
   },
   listItemMeta: {
     display: 'flex',
@@ -277,6 +290,11 @@ export interface RevisionBrowserDialogProps {
    */
   deleteBlockedReason?: (rev: BindingRevision) => string | null;
   onDelete?: (rev: BindingRevision) => void;
+  /**
+   * The control that shows and changes the binding's revision history limit,
+   * placed in the footer after Delete.
+   */
+  historyLimitControl?: ReactNode;
 }
 
 /**
@@ -285,7 +303,7 @@ export interface RevisionBrowserDialogProps {
  * revision's details with a View tab (its full revision object as YAML)
  * and a Compare tab (a side-by-side diff against another revision, the
  * active one by default). The footer rolls back to the highlighted revision,
- * or deletes it. Numbers missing from the history -- revisions deleted, or
+ * or deletes it, and holds the binding's revision history limit. Numbers missing from the history -- revisions deleted, or
  * removed by the history limit -- are listed as unavailable, never as
  * revisions: nothing of them is kept.
  */
@@ -300,6 +318,7 @@ export const RevisionBrowserDialog = ({
   onRollback,
   deleteBlockedReason,
   onDelete,
+  historyLimitControl,
 }: RevisionBrowserDialogProps) => {
   const classes = useStyles();
   const [query, setQuery] = useState('');
@@ -724,18 +743,26 @@ export const RevisionBrowserDialog = ({
       </DialogContent>
 
       <DialogActions>
-        {highlighted && onDelete && (
-          <Tooltip title={deleteBlocked ?? ''}>
-            <span className={classes.footerStart}>
-              <Button
-                color="secondary"
-                disabled={!!deleteBlocked}
-                onClick={() => onDelete(highlighted)}
-              >
-                Delete r{revisionNumber(highlighted)}
-              </Button>
-            </span>
-          </Tooltip>
+        {((highlighted && onDelete) || historyLimitControl) && (
+          <Box className={classes.footerStart}>
+            {highlighted && onDelete && (
+              <Tooltip title={deleteBlocked ?? ''}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    className={classes.deleteButton}
+                    startIcon={<DeleteOutlineIcon fontSize="small" />}
+                    disabled={!!deleteBlocked}
+                    onClick={() => onDelete(highlighted)}
+                  >
+                    Delete r{revisionNumber(highlighted)}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            {historyLimitControl}
+          </Box>
         )}
         <Button onClick={onClose}>Cancel</Button>
         {highlighted && (

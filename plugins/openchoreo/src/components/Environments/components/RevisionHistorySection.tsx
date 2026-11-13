@@ -14,6 +14,7 @@ import { Skeleton } from '@openchoreo/backstage-design-system';
 import {
   useReleaseBindingDeleteRevisionPermission,
   useReleaseBindingRollbackPermission,
+  useReleaseBindingUpdatePermission,
 } from '@openchoreo/backstage-plugin-react';
 import type {
   BindingRevision,
@@ -57,6 +58,8 @@ const BoundRevisionHistoryProvider = ({
     useReleaseBindingRollbackPermission(envResourceName);
   const { canDeleteRevision, deniedTooltip: deleteDeniedTooltip } =
     useReleaseBindingDeleteRevisionPermission(envResourceName);
+  const { canUpdate, deniedTooltip: updateDeniedTooltip } =
+    useReleaseBindingUpdatePermission(envResourceName);
 
   const releaseNames = useMemo(
     () =>
@@ -78,6 +81,8 @@ const BoundRevisionHistoryProvider = ({
     deniedTooltip,
     canDeleteRevision,
     deleteDeniedTooltip,
+    canUpdateBinding: canUpdate,
+    updateDeniedTooltip,
     onRolledBack: () => refetchEnvironments(),
   });
 

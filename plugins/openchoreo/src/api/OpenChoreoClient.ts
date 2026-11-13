@@ -11,6 +11,7 @@ import {
   type ResourceReleaseBindingRevision,
   type RollbackResponse,
   type DeleteBindingRevisionResponse,
+  type BindingRevisionHistoryLimit,
   type ReleaseLineSummary,
   type ReleaseLineOverrides,
   type ReleaseLineResource,
@@ -95,6 +96,7 @@ const API_ENDPOINTS = {
   ROLLBACK_RESOURCE_RELEASE_BINDING: '/rollback-resource-release-binding',
   DELETE_RESOURCE_RELEASE_BINDING_REVISION:
     '/delete-resource-release-binding-revision',
+  BINDING_REVISION_HISTORY_LIMIT: '/binding-revision-history-limit',
   UPDATE_RELEASE_BINDING: '/update-release-binding',
   PATCH_RELEASE_BINDING: '/patch-release-binding',
   RESOURCE_TREE: '/resourcetree',
@@ -816,6 +818,53 @@ export class OpenChoreoClient implements OpenChoreoClientApi {
       {
         method: 'POST',
         body: { namespaceName, bindingName, revisionName, dryRun },
+      },
+    );
+  }
+
+  /** The namespace of the entity a binding of the given kind belongs to. */
+  private bindingNamespace(
+    entity: Entity,
+    kind: 'component' | 'resource',
+  ): string {
+    return kind === 'resource'
+      ? extractResourceEntityMetadata(entity).namespaceName
+      : extractEntityMetadata(entity).namespace;
+  }
+
+  async getBindingRevisionHistoryLimit(
+    entity: Entity,
+    kind: 'component' | 'resource',
+    bindingName: string,
+  ): Promise<BindingRevisionHistoryLimit> {
+    return this.apiFetch<BindingRevisionHistoryLimit>(
+      API_ENDPOINTS.BINDING_REVISION_HISTORY_LIMIT,
+      {
+        params: {
+          namespaceName: this.bindingNamespace(entity, kind),
+          bindingName,
+          kind,
+        },
+      },
+    );
+  }
+
+  async setBindingRevisionHistoryLimit(
+    entity: Entity,
+    kind: 'component' | 'resource',
+    bindingName: string,
+    limit: number | null,
+  ): Promise<BindingRevisionHistoryLimit> {
+    return this.apiFetch<BindingRevisionHistoryLimit>(
+      API_ENDPOINTS.BINDING_REVISION_HISTORY_LIMIT,
+      {
+        method: 'PUT',
+        body: {
+          namespaceName: this.bindingNamespace(entity, kind),
+          bindingName,
+          kind,
+          limit,
+        },
       },
     );
   }

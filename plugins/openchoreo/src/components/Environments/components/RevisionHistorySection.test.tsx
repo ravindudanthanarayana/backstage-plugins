@@ -50,10 +50,16 @@ const mockDeletePermission = {
   loading: false,
   deniedTooltip: '',
 };
+const mockUpdatePermission = {
+  canUpdate: true,
+  loading: false,
+  deniedTooltip: '',
+};
 jest.mock('@openchoreo/backstage-plugin-react', () => ({
   ...jest.requireActual('@openchoreo/backstage-plugin-react'),
   useReleaseBindingRollbackPermission: () => mockPermission,
   useReleaseBindingDeleteRevisionPermission: () => mockDeletePermission,
+  useReleaseBindingUpdatePermission: () => mockUpdatePermission,
   YamlDiffViewer: () => <div data-testid="yaml-diff-viewer" />,
 }));
 
@@ -150,6 +156,14 @@ const apiError = (status: number, error: Record<string, unknown>) =>
     }),
   );
 
+// The Revision Browser reads the binding's history limit when it opens;
+// tests that are not about the limit get one that is not set anywhere.
+const historyLimitClient = () => ({
+  getBindingRevisionHistoryLimit: jest
+    .fn()
+    .mockResolvedValue({ bindingLimit: null, environmentLimit: null }),
+});
+
 // The pieces as the deploy panel places them: the revision row in the
 // release section, Roll back in the Actions section.
 function setup(
@@ -158,7 +172,7 @@ function setup(
 ) {
   const alertApi = { post: jest.fn(), alert$: jest.fn() };
   const wrapper = createQueryWrapper([
-    [openChoreoClientApiRef, client],
+    [openChoreoClientApiRef, { ...historyLimitClient(), ...client }],
     [alertApiRef, alertApi],
   ]);
   render(

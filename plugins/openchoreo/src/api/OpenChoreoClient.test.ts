@@ -666,4 +666,59 @@ describe('OpenChoreoClient — resource release binding revisions', () => {
       }),
     );
   });
+
+  it.each([
+    ['component', BASE_ENTITY, 'api-dev'],
+    ['resource', RESOURCE_ENTITY, 'analytics-db-dev'],
+  ] as const)(
+    'GETs /binding-revision-history-limit for a %s binding',
+    async (kind, entity, bindingName) => {
+      const limit = { bindingLimit: 5, environmentLimit: 10 };
+      fetchMock.mockResolvedValueOnce(makeJsonResponse(limit));
+
+      await expect(
+        client.getBindingRevisionHistoryLimit(entity as any, kind, bindingName),
+      ).resolves.toEqual(limit);
+      const [calledUrl, opts] = fetchMock.mock.calls[0];
+      const url = new URL(calledUrl);
+      expect(url.pathname).toContain('/binding-revision-history-limit');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        namespaceName: 'test-ns',
+        bindingName,
+        kind,
+      });
+      expect(opts.method).toBe('GET');
+    },
+  );
+
+  it.each([
+    ['component', BASE_ENTITY, 'api-dev', 7],
+    ['resource', RESOURCE_ENTITY, 'analytics-db-dev', 0],
+    ['component', BASE_ENTITY, 'api-dev', null],
+  ] as const)(
+    'PUTs /binding-revision-history-limit for a %s binding',
+    async (kind, entity, bindingName, limit) => {
+      const saved = { bindingLimit: limit, environmentLimit: null };
+      fetchMock.mockResolvedValueOnce(makeJsonResponse(saved));
+
+      await expect(
+        client.setBindingRevisionHistoryLimit(
+          entity as any,
+          kind,
+          bindingName,
+          limit,
+        ),
+      ).resolves.toEqual(saved);
+      const [calledUrl, opts] = fetchMock.mock.calls[0];
+      expect(calledUrl).toContain('/binding-revision-history-limit');
+      expect(opts.method).toBe('PUT');
+      // null is sent, not dropped: it clears the binding's own limit.
+      expect(JSON.parse(opts.body)).toEqual({
+        namespaceName: 'test-ns',
+        bindingName,
+        kind,
+        limit,
+      });
+    },
+  );
 });

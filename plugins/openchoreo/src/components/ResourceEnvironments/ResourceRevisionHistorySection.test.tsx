@@ -45,6 +45,11 @@ jest.mock('@openchoreo/backstage-plugin-react', () => ({
     mockComponentPermission(env);
     return mockPermission;
   },
+  useResourceReleaseBindingUpdatePermission: () => ({
+    canUpdate: true,
+    loading: false,
+    deniedTooltip: '',
+  }),
   useResourceReleaseBindingDeleteRevisionPermission: () => ({
     canDeleteRevision: true,
     loading: false,
@@ -168,7 +173,16 @@ const apiError = (status: number, error: Record<string, unknown>) =>
 function setup(client: Record<string, jest.Mock>) {
   const alertApi = { post: jest.fn(), alert$: jest.fn() };
   const wrapper = createQueryWrapper([
-    [openChoreoClientApiRef, client],
+    [
+      openChoreoClientApiRef,
+      {
+        // The Revision Browser reads the history limit when it opens.
+        getBindingRevisionHistoryLimit: jest
+          .fn()
+          .mockResolvedValue({ bindingLimit: null, environmentLimit: null }),
+        ...client,
+      },
+    ],
     [alertApiRef, alertApi],
   ]);
   render(<ResourceRevisionHistorySection env={env} />, { wrapper });

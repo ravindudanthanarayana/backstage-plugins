@@ -6,6 +6,7 @@ import {
   requireApiResponse,
 } from '@openchoreo/openchoreo-client-node';
 import type {
+  BindingRevisionHistoryLimit,
   DeleteBindingRevisionResponse,
   ReleaseBindingRevision,
   ResourceReleaseBindingRevision,
@@ -393,5 +394,270 @@ export class ReleaseBindingRevisionService {
       { data, error, response },
       'delete resource release binding revision',
     );
+  }
+
+  /**
+   * Reads the revision history limit of a release binding, with its
+   * Environment's limit for when the binding sets none.
+   */
+  async getHistoryLimit(
+    request: { namespaceName: string; bindingName: string },
+    token?: string,
+  ): Promise<BindingRevisionHistoryLimit> {
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      token,
+      logger: this.logger,
+    });
+
+    const { data, error, response } = await client.GET(
+      '/api/v1/namespaces/{namespaceName}/releasebindings/{releaseBindingName}',
+      {
+        params: {
+          path: {
+            namespaceName: request.namespaceName,
+            releaseBindingName: request.bindingName,
+          },
+        },
+      },
+    );
+    const binding = requireApiResponse(
+      { data, error, response },
+      'fetch release binding',
+    );
+
+    return {
+      bindingLimit: binding.spec?.revisionHistoryLimit ?? null,
+      environmentLimit: await this.environmentHistoryLimit(
+        request.namespaceName,
+        binding.spec?.environment,
+        token,
+      ),
+    };
+  }
+
+  /**
+   * Sets the revision history limit of a release binding, or with a null
+   * limit clears it so the Environment's applies. Changing the limit records
+   * no revision; lowering it deletes the oldest revisions.
+   */
+  async setHistoryLimit(
+    request: {
+      namespaceName: string;
+      bindingName: string;
+      limit: number | null;
+    },
+    token?: string,
+  ): Promise<BindingRevisionHistoryLimit> {
+    this.logger.info(
+      `Setting revision history limit of release binding ${
+        request.bindingName
+      } to ${request.limit ?? 'unset'}`,
+    );
+
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      token,
+      logger: this.logger,
+    });
+    const params = {
+      path: {
+        namespaceName: request.namespaceName,
+        releaseBindingName: request.bindingName,
+      },
+    };
+
+    const existing = await client.GET(
+      '/api/v1/namespaces/{namespaceName}/releasebindings/{releaseBindingName}',
+      { params },
+    );
+    const binding = requireApiResponse(existing, 'fetch release binding');
+    if (!binding.spec) {
+      throw new ConflictError(
+        `Release binding ${request.bindingName} has no spec to update`,
+      );
+    }
+
+    const { revisionHistoryLimit: _previous, ...spec } = binding.spec;
+    const updated = await client.PUT(
+      '/api/v1/namespaces/{namespaceName}/releasebindings/{releaseBindingName}',
+      {
+        params,
+        body: {
+          ...binding,
+          spec: {
+            ...spec,
+            ...(request.limit === null
+              ? {}
+              : { revisionHistoryLimit: request.limit }),
+          },
+        },
+      },
+    );
+    const conflict = conflictWithCode(
+      updated.response.status,
+      updated.error,
+      'The binding changed while the history limit was being saved',
+    );
+    if (conflict) throw conflict;
+    requireApiResponse(updated, 'update release binding');
+
+    return {
+      bindingLimit: request.limit,
+      environmentLimit: await this.environmentHistoryLimit(
+        request.namespaceName,
+        binding.spec.environment,
+        token,
+      ),
+    };
+  }
+
+  /**
+   * Reads the revision history limit of a resource release binding, as
+   * getHistoryLimit does for a release binding.
+   */
+  async getResourceHistoryLimit(
+    request: { namespaceName: string; bindingName: string },
+    token?: string,
+  ): Promise<BindingRevisionHistoryLimit> {
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      token,
+      logger: this.logger,
+    });
+
+    const { data, error, response } = await client.GET(
+      '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+      {
+        params: {
+          path: {
+            namespaceName: request.namespaceName,
+            resourceReleaseBindingName: request.bindingName,
+          },
+        },
+      },
+    );
+    const binding = requireApiResponse(
+      { data, error, response },
+      'fetch resource release binding',
+    );
+
+    return {
+      bindingLimit: binding.spec?.revisionHistoryLimit ?? null,
+      environmentLimit: await this.environmentHistoryLimit(
+        request.namespaceName,
+        binding.spec?.environment,
+        token,
+      ),
+    };
+  }
+
+  /**
+   * Sets or clears the revision history limit of a resource release binding,
+   * as setHistoryLimit does for a release binding.
+   */
+  async setResourceHistoryLimit(
+    request: {
+      namespaceName: string;
+      bindingName: string;
+      limit: number | null;
+    },
+    token?: string,
+  ): Promise<BindingRevisionHistoryLimit> {
+    this.logger.info(
+      `Setting revision history limit of resource release binding ${
+        request.bindingName
+      } to ${request.limit ?? 'unset'}`,
+    );
+
+    const client = createOpenChoreoApiClient({
+      baseUrl: this.baseUrl,
+      token,
+      logger: this.logger,
+    });
+    const params = {
+      path: {
+        namespaceName: request.namespaceName,
+        resourceReleaseBindingName: request.bindingName,
+      },
+    };
+
+    const existing = await client.GET(
+      '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+      { params },
+    );
+    const binding = requireApiResponse(
+      existing,
+      'fetch resource release binding',
+    );
+    if (!binding.spec) {
+      throw new ConflictError(
+        `Resource release binding ${request.bindingName} has no spec to update`,
+      );
+    }
+
+    const { revisionHistoryLimit: _previous, ...spec } = binding.spec;
+    const updated = await client.PUT(
+      '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+      {
+        params,
+        body: {
+          ...binding,
+          spec: {
+            ...spec,
+            ...(request.limit === null
+              ? {}
+              : { revisionHistoryLimit: request.limit }),
+          },
+        },
+      },
+    );
+    const conflict = conflictWithCode(
+      updated.response.status,
+      updated.error,
+      'The binding changed while the history limit was being saved',
+    );
+    if (conflict) throw conflict;
+    requireApiResponse(updated, 'update resource release binding');
+
+    return {
+      bindingLimit: request.limit,
+      environmentLimit: await this.environmentHistoryLimit(
+        request.namespaceName,
+        binding.spec.environment,
+        token,
+      ),
+    };
+  }
+
+  /**
+   * The Environment's spec.revisionHistoryLimit, or null when it sets none.
+   * It is only shown as the value a binding inherits, so an Environment the
+   * user may not read is reported as null rather than failing the request.
+   */
+  private async environmentHistoryLimit(
+    namespaceName: string,
+    environment: string | undefined,
+    token?: string,
+  ): Promise<number | null> {
+    if (!environment) return null;
+    try {
+      const client = createOpenChoreoApiClient({
+        baseUrl: this.baseUrl,
+        token,
+        logger: this.logger,
+      });
+      const { data, response } = await client.GET(
+        '/api/v1/namespaces/{namespaceName}/environments/{envName}',
+        { params: { path: { namespaceName, envName: environment } } },
+      );
+      if (!response.ok) return null;
+      return data?.spec?.revisionHistoryLimit ?? null;
+    } catch (err) {
+      this.logger.debug(
+        `Could not read environment ${environment} for its revision history limit: ${err}`,
+      );
+      return null;
+    }
   }
 }

@@ -97,6 +97,10 @@ function createMockServices() {
       rollbackResource: jest.fn(),
       deleteRevision: jest.fn(),
       deleteResourceRevision: jest.fn(),
+      getHistoryLimit: jest.fn(),
+      setHistoryLimit: jest.fn(),
+      getResourceHistoryLimit: jest.fn(),
+      setResourceHistoryLimit: jest.fn(),
     },
     secretReferencesInfoService: {
       fetchSecretReferences: jest.fn(),
@@ -958,6 +962,101 @@ describe('createRouter', () => {
         .query({ namespaceName: 'my-namespace', componentName: 'api' });
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe('/binding-revision-history-limit', () => {
+    const limit = { bindingLimit: 5, environmentLimit: 10 };
+
+    it.each([
+      [undefined, 'getHistoryLimit'],
+      ['component', 'getHistoryLimit'],
+      ['resource', 'getResourceHistoryLimit'],
+    ] as const)('GET with kind %s reads through %s', async (kind, method) => {
+      services.releaseBindingRevisionService[method].mockResolvedValue(limit);
+
+      const response = await request(app)
+        .get('/binding-revision-history-limit')
+        .query({
+          namespaceName: 'ns',
+          bindingName: 'api-dev',
+          ...(kind ? { kind } : {}),
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(limit);
+      expect(
+        services.releaseBindingRevisionService[method],
+      ).toHaveBeenCalledWith(
+        { namespaceName: 'ns', bindingName: 'api-dev' },
+        'mock-user-token',
+      );
+    });
+
+    it('GET returns 400 without a binding name or with an unknown kind', async () => {
+      const missing = await request(app)
+        .get('/binding-revision-history-limit')
+        .query({ namespaceName: 'ns' });
+      expect(missing.status).toBe(400);
+
+      const unknown = await request(app)
+        .get('/binding-revision-history-limit')
+        .query({ namespaceName: 'ns', bindingName: 'b', kind: 'project' });
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.error.message).toContain('kind');
+    });
+
+    it.each([
+      ['component', 'setHistoryLimit', 7],
+      ['resource', 'setResourceHistoryLimit', 0],
+      ['component', 'setHistoryLimit', null],
+    ] as const)(
+      'PUT with kind %s through %s sets the limit to %s',
+      async (kind, method, value) => {
+        const saved = { bindingLimit: value, environmentLimit: 10 };
+        services.releaseBindingRevisionService[method].mockResolvedValue(saved);
+
+        const response = await request(app)
+          .put('/binding-revision-history-limit')
+          .send({
+            namespaceName: 'ns',
+            bindingName: 'api-dev',
+            kind,
+            limit: value,
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual(saved);
+        expect(
+          services.releaseBindingRevisionService[method],
+        ).toHaveBeenCalledWith(
+          { namespaceName: 'ns', bindingName: 'api-dev', limit: value },
+          'mock-user-token',
+        );
+      },
+    );
+
+    it.each([
+      [{ namespaceName: 'ns', limit: 5 }, 'bindingName'],
+      [{ namespaceName: 'ns', bindingName: 'b' }, 'limit is required'],
+      [{ namespaceName: 'ns', bindingName: 'b', limit: -1 }, 'limit must be'],
+      [{ namespaceName: 'ns', bindingName: 'b', limit: 1.5 }, 'limit must be'],
+      [{ namespaceName: 'ns', bindingName: 'b', limit: '5' }, 'limit must be'],
+      [{ namespaceName: 'ns', bindingName: 'b', limit: 1001 }, 'limit must be'],
+      [{ namespaceName: 'ns', bindingName: 'b', limit: 5, kind: 'x' }, 'kind'],
+    ])('PUT returns 400 for %j', async (body, message) => {
+      const response = await request(app)
+        .put('/binding-revision-history-limit')
+        .send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.message).toContain(message);
+      expect(
+        services.releaseBindingRevisionService.setHistoryLimit,
+      ).not.toHaveBeenCalled();
+      expect(
+        services.releaseBindingRevisionService.setResourceHistoryLimit,
+      ).not.toHaveBeenCalled();
     });
   });
 

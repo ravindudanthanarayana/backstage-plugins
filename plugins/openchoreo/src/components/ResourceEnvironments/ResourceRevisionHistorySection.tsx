@@ -1,6 +1,7 @@
 import {
   useResourceReleaseBindingDeleteRevisionPermission,
   useResourceReleaseBindingRollbackPermission,
+  useResourceReleaseBindingUpdatePermission,
 } from '@openchoreo/backstage-plugin-react';
 import type { ResourceEnvironment } from '../../api/OpenChoreoClientApi';
 import { BindingRevisionHistory } from '../Environments/components/BindingRevisionHistory';
@@ -31,6 +32,8 @@ export const ResourceRevisionHistorySection = ({
     useResourceReleaseBindingRollbackPermission(envResourceName);
   const { canDeleteRevision, deniedTooltip: deleteDeniedTooltip } =
     useResourceReleaseBindingDeleteRevisionPermission(envResourceName);
+  const { canUpdate, deniedTooltip: updateDeniedTooltip } =
+    useResourceReleaseBindingUpdatePermission(envResourceName);
 
   return (
     <BindingRevisionHistory
@@ -43,6 +46,8 @@ export const ResourceRevisionHistorySection = ({
       deniedTooltip={deniedTooltip}
       canDeleteRevision={canDeleteRevision}
       deleteDeniedTooltip={deleteDeniedTooltip}
+      canUpdateBinding={canUpdate}
+      updateDeniedTooltip={updateDeniedTooltip}
       onRolledBack={() => void refetch()}
       className={classes.section}
     />

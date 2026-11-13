@@ -3,6 +3,7 @@ import { alertApiRef, useApi } from '@backstage/core-plugin-api';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import type {
   BindingRevision,
+  BindingRevisionHistoryLimit,
   DeleteBindingRevisionResponse,
   RollbackResponse,
 } from '@openchoreo/backstage-plugin-common';
@@ -18,6 +19,10 @@ import { RevisionBrowserDialog } from './RevisionBrowserDialog';
 import { RevisionManifestDialog } from './RevisionManifestDialog';
 import { RollbackConfirmDialog } from './RollbackConfirmDialog';
 import { DeleteRevisionDialog } from './DeleteRevisionDialog';
+import {
+  RevisionHistoryLimitControl,
+  inheritedLimitText,
+} from './RevisionHistoryLimitControl';
 
 export interface UseBindingRevisionHistoryOptions {
   /** Whose binding: a Component's ReleaseBinding or a Resource's. */
@@ -34,6 +39,12 @@ export interface UseBindingRevisionHistoryOptions {
   /** Whether the user may delete revisions; false hides nothing, it disables. */
   canDeleteRevision?: boolean;
   deleteDeniedTooltip?: string;
+  /**
+   * Whether the user may change the binding, which its revision history
+   * limit is part of; false disables the limit control.
+   */
+  canUpdateBinding?: boolean;
+  updateDeniedTooltip?: string;
   /** Called after a rollback is applied, to refresh the environments. */
   onRolledBack: () => void;
 }
@@ -83,6 +94,8 @@ export const useBindingRevisionHistory = ({
   deniedTooltip,
   canDeleteRevision = false,
   deleteDeniedTooltip = '',
+  canUpdateBinding = false,
+  updateDeniedTooltip = '',
   onRolledBack,
 }: UseBindingRevisionHistoryOptions): BindingRevisionHistory => {
   const { entity } = useEntity();
@@ -156,6 +169,24 @@ export const useBindingRevisionHistory = ({
     refetch();
   };
 
+  // A lower limit makes the controller delete the oldest revisions; the list
+  // is refreshed now and keeps polling, so they drop out as they go.
+  const handleLimitChanged = (limit: BindingRevisionHistoryLimit) => {
+    alertApi.post({
+      message:
+        limit.bindingLimit === null
+          ? `${environmentName} now uses ${inheritedLimitText(
+              limit,
+            )} for its revision history.`
+          : `${environmentName} now keeps ${limit.bindingLimit} old ${
+              limit.bindingLimit === 1 ? 'revision' : 'revisions'
+            }.`,
+      severity: 'success',
+      display: 'transient',
+    });
+    refetch();
+  };
+
   const openBrowser = (name?: string) => {
     setBrowserInitialName(name ?? selectedName);
     setBrowserOpen(true);
@@ -197,6 +228,23 @@ export const useBindingRevisionHistory = ({
           })
         }
         onDelete={openDelete}
+        historyLimitControl={
+          // Mounted with the browser so the limit is read when it opens.
+          browserOpen && (
+            <RevisionHistoryLimitControl
+              kind={kind}
+              bindingName={bindingName}
+              environmentName={environmentName}
+              oldRevisionCount={revisions.filter(r => !isActive(r)).length}
+              canUpdate={canUpdateBinding}
+              deniedTooltip={
+                updateDeniedTooltip ||
+                'You do not have permission to change the revision history limit.'
+              }
+              onChanged={handleLimitChanged}
+            />
+          )
+        }
       />
 
       <RollbackConfirmDialog

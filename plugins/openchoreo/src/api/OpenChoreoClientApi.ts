@@ -8,6 +8,7 @@ import type {
   ResourceReleaseBindingRevision,
   RollbackResponse,
   DeleteBindingRevisionResponse,
+  BindingRevisionHistoryLimit,
   ReleaseLineSummary,
   ReleaseLineOverrides,
   ReleaseLineResource,
@@ -904,6 +905,29 @@ export interface OpenChoreoClientApi {
     revisionName: string,
     dryRun: boolean,
   ): Promise<DeleteBindingRevisionResponse>;
+
+  /**
+   * The revision history limit of a Component's ('component') or a
+   * Resource's ('resource') release binding: how many old revisions it keeps
+   * for rollback, with the Environment's limit it falls back to.
+   */
+  getBindingRevisionHistoryLimit(
+    entity: Entity,
+    kind: 'component' | 'resource',
+    bindingName: string,
+  ): Promise<BindingRevisionHistoryLimit>;
+
+  /**
+   * Set a binding's revision history limit, or clear it with null so the
+   * Environment's applies. Changing it records no revision; lowering it
+   * deletes the oldest revisions.
+   */
+  setBindingRevisionHistoryLimit(
+    entity: Entity,
+    kind: 'component' | 'resource',
+    bindingName: string,
+    limit: number | null,
+  ): Promise<BindingRevisionHistoryLimit>;
 
   /** Create or update a release binding for deploy/promote actions */
   updateReleaseBinding(

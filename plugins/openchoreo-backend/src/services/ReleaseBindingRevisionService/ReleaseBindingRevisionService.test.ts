@@ -6,6 +6,7 @@ import { ReleaseBindingRevisionService } from './ReleaseBindingRevisionService';
 const mockGET = jest.fn();
 const mockPOST = jest.fn();
 const mockDELETE = jest.fn();
+const mockPUT = jest.fn();
 
 jest.mock('@openchoreo/openchoreo-client-node', () => ({
   ...jest.requireActual('@openchoreo/openchoreo-client-node'),
@@ -13,6 +14,7 @@ jest.mock('@openchoreo/openchoreo-client-node', () => ({
     GET: mockGET,
     POST: mockPOST,
     DELETE: mockDELETE,
+    PUT: mockPUT,
   })),
 }));
 
@@ -365,6 +367,143 @@ describe('ReleaseBindingRevisionService', () => {
       await expect(
         createService().deleteResourceRevision(request, 'tok'),
       ).rejects.toThrow(NotAllowedError);
+    });
+  });
+
+  describe('history limit', () => {
+    const request = { namespaceName: 'test-ns', bindingName: 'api-dev' };
+    const binding = (limit?: number) => ({
+      metadata: { name: 'api-dev', namespace: 'test-ns' },
+      spec: {
+        owner: { projectName: 'shop', componentName: 'api' },
+        environment: 'development',
+        releaseName: 'api-1',
+        ...(limit === undefined ? {} : { revisionHistoryLimit: limit }),
+      },
+    });
+    const environment = (limit?: number) => ({
+      metadata: { name: 'development' },
+      spec: limit === undefined ? {} : { revisionHistoryLimit: limit },
+    });
+    const kinds = [
+      [
+        'getHistoryLimit',
+        'setHistoryLimit',
+        '/api/v1/namespaces/{namespaceName}/releasebindings/{releaseBindingName}',
+        'releaseBindingName',
+      ],
+      [
+        'getResourceHistoryLimit',
+        'setResourceHistoryLimit',
+        '/api/v1/namespaces/{namespaceName}/resourcereleasebindings/{resourceReleaseBindingName}',
+        'resourceReleaseBindingName',
+      ],
+    ] as const;
+
+    it.each(kinds)(
+      '%s reads the binding limit and the environment limit',
+      async (get, _set, path, param) => {
+        mockGET
+          .mockResolvedValueOnce(createOkResponse(binding(3)))
+          .mockResolvedValueOnce(createOkResponse(environment(10)));
+
+        await expect(createService()[get](request, 'tok')).resolves.toEqual({
+          bindingLimit: 3,
+          environmentLimit: 10,
+        });
+        expect(mockGET).toHaveBeenNthCalledWith(1, path, {
+          params: { path: { namespaceName: 'test-ns', [param]: 'api-dev' } },
+        });
+        expect(mockGET).toHaveBeenNthCalledWith(
+          2,
+          '/api/v1/namespaces/{namespaceName}/environments/{envName}',
+          {
+            params: {
+              path: { namespaceName: 'test-ns', envName: 'development' },
+            },
+          },
+        );
+      },
+    );
+
+    it('reports unset limits as null, keeping an explicit 0', async () => {
+      mockGET
+        .mockResolvedValueOnce(createOkResponse(binding()))
+        .mockResolvedValueOnce(createOkResponse(environment(0)));
+      await expect(
+        createService().getHistoryLimit(request, 'tok'),
+      ).resolves.toEqual({ bindingLimit: null, environmentLimit: 0 });
+    });
+
+    it('reports null for an environment the user may not read', async () => {
+      mockGET
+        .mockResolvedValueOnce(createOkResponse(binding(4)))
+        .mockResolvedValueOnce(createErrorResponse(403));
+      await expect(
+        createService().getHistoryLimit(request, 'tok'),
+      ).resolves.toEqual({ bindingLimit: 4, environmentLimit: null });
+    });
+
+    it.each(kinds)(
+      '%s / %s writes the limit into the binding spec, keeping the rest',
+      async (_get, set, path, param) => {
+        mockGET
+          .mockResolvedValueOnce(createOkResponse(binding(3)))
+          .mockResolvedValueOnce(createOkResponse(environment()));
+        mockPUT.mockResolvedValueOnce(createOkResponse(binding(7)));
+
+        await expect(
+          createService()[set]({ ...request, limit: 7 }, 'tok'),
+        ).resolves.toEqual({ bindingLimit: 7, environmentLimit: null });
+        expect(mockPUT).toHaveBeenCalledWith(path, {
+          params: { path: { namespaceName: 'test-ns', [param]: 'api-dev' } },
+          body: binding(7),
+        });
+      },
+    );
+
+    it('removes the field when the limit is cleared', async () => {
+      mockGET
+        .mockResolvedValueOnce(createOkResponse(binding(3)))
+        .mockResolvedValueOnce(createOkResponse(environment(10)));
+      mockPUT.mockResolvedValueOnce(createOkResponse(binding()));
+
+      await expect(
+        createService().setHistoryLimit({ ...request, limit: null }, 'tok'),
+      ).resolves.toEqual({ bindingLimit: null, environmentLimit: 10 });
+      const body = mockPUT.mock.calls[0][1].body;
+      expect(body).toEqual(binding());
+      expect(body.spec).not.toHaveProperty('revisionHistoryLimit');
+    });
+
+    it('writes an explicit 0', async () => {
+      mockGET
+        .mockResolvedValueOnce(createOkResponse(binding()))
+        .mockResolvedValueOnce(createOkResponse(environment(10)));
+      mockPUT.mockResolvedValueOnce(createOkResponse(binding(0)));
+
+      await createService().setHistoryLimit({ ...request, limit: 0 }, 'tok');
+      expect(mockPUT.mock.calls[0][1].body.spec.revisionHistoryLimit).toBe(0);
+    });
+
+    it('does not write when the binding cannot be read', async () => {
+      mockGET.mockResolvedValueOnce(createErrorResponse(403));
+      await expect(
+        createService().setHistoryLimit({ ...request, limit: 5 }, 'tok'),
+      ).rejects.toThrow(NotAllowedError);
+      expect(mockPUT).not.toHaveBeenCalled();
+    });
+
+    it('turns a 409 on save into a ConflictError', async () => {
+      mockGET.mockResolvedValueOnce(createOkResponse(binding()));
+      mockPUT.mockResolvedValueOnce(
+        conflict('CONCURRENT_MODIFICATION', 'the binding was modified'),
+      );
+      const err = await createService()
+        .setResourceHistoryLimit({ ...request, limit: 5 }, 'tok')
+        .catch(e => e);
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.code).toBe('CONCURRENT_MODIFICATION');
     });
   });
 });

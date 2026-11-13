@@ -255,6 +255,32 @@ describe('RevisionBrowserDialog deleting', () => {
     expect(screen.getByRole('button', { name: 'Delete r4' })).toBeDisabled();
   });
 
+  it('places the history limit control in the footer after Delete', () => {
+    setup({
+      onDelete: jest.fn(),
+      historyLimitControl: <button type="button">History limit: 10</button>,
+    });
+
+    const del = screen.getByRole('button', { name: 'Delete r2' });
+    const limit = screen.getByRole('button', { name: 'History limit: 10' });
+    expect(del.compareDocumentPosition(limit)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    const rollback = screen.getByRole('button', { name: 'Roll back to r2' });
+    expect(limit.compareDocumentPosition(rollback)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('shows the history limit control without a delete action', () => {
+    setup({
+      historyLimitControl: <button type="button">History limit: 10</button>,
+    });
+    expect(
+      screen.getByRole('button', { name: 'History limit: 10' }),
+    ).toBeInTheDocument();
+  });
+
   it('offers no delete without onDelete', () => {
     setup();
     expect(
